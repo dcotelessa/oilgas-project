@@ -60,26 +60,153 @@ func (h *Handlers) GetCustomer(c *gin.Context) {
 }
 
 func (h *Handlers) CreateCustomer(c *gin.Context) {
-	// TODO: Implement customer creation with validation
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement customer creation",
-		"note":    "Requires CustomerValidation and repository Create method",
+	var req validation.CustomerValidation
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid JSON",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Validate customer data
+	if errors := req.Validate(); len(errors) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":             "Validation failed",
+			"validation_errors": errors,
+		})
+		return
+	}
+
+	// Create customer through service
+	customer, err := h.services.Customer.Create(c.Request.Context(), &req)
+	if err != nil {
+		// Check for duplicate customer name
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "already exists") {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "Customer with this name already exists",
+			})
+			return
+		}
+		
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to create customer",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":  "Customer created successfully",
+		"customer": customer,
 	})
 }
 
 func (h *Handlers) UpdateCustomer(c *gin.Context) {
-	// TODO: Implement customer update
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement customer update",
-		"note":    "Requires repository Update method",
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid customer ID",
+		})
+		return
+	}
+
+	var req validation.CustomerValidation
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid JSON",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Validate customer data
+	if errors := req.Validate(); len(errors) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":             "Validation failed",
+			"validation_errors": errors,
+		})
+		return
+	}
+
+	// Update customer through service
+	customer, err := h.services.Customer.Update(c.Request.Context(), id, &req)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Customer not found",
+			})
+			return
+		}
+		
+		if strings.Contains(err.Error(), "duplicate") {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "Customer name already exists",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to update customer",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "Customer updated successfully",
+		"customer": customer,
 	})
 }
 
 func (h *Handlers) DeleteCustomer(c *gin.Context) {
-	// TODO: Implement customer deletion
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement customer deletion",
-		"note":    "Requires repository Delete method",
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid customer ID",
+		})
+		return
+	}
+
+	// Check if customer has associated inventory items
+	hasInventory, err := h.services.Customer.HasActiveInventory(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to check customer dependencies",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	if hasInventory {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "Cannot delete customer with active inventory items",
+			"note":  "Move or complete all inventory items first",
+		})
+		return
+	}
+
+	// Soft delete customer through service
+	err = h.services.Customer.Delete(c.Request.Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Customer not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to delete customer",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Customer deleted successfully",
 	})
 }
 
@@ -351,28 +478,166 @@ func (h *Handlers) GetInventorySummary(c *gin.Context) {
 
 // Grade handlers
 func (h *Handlers) GetGrades(c *gin.Context) {
-	// For now, return static grades - could be made dynamic later
-	grades := []string{"J55", "JZ55", "K55", "L80", "N80", "P105", "P110", "Q125", "T95", "C90", "C95", "S135"}
+	// Get grades from database instead of hard-coded list
+	grades, err := h.services.Grade.GetAll(c.Request.Context())
+	if err != nil {
+		// Fallback to default grades if database fails
+		defaultGrades := []string{"J55", "JZ55", "K55", "L80", "N80", "P105", "P110", "Q125", "T95", "C90", "C95", "S135"}
+		c.JSON(http.StatusOK, gin.H{
+			"grades":   defaultGrades,
+			"total":    len(defaultGrades),
+			"source":   "default",
+			"warning":  "Using fallback grades due to database error",
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"grades": grades,
 		"total":  len(grades),
+		"source": "database",
 	})
 }
 
 func (h *Handlers) CreateGrade(c *gin.Context) {
-	// TODO: Implement grade creation
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement grade creation",
-		"note":    "Add to grade repository when needed",
+	var req struct {
+		Grade       string `json:"grade" binding:"required,min=2,max=20"`
+		Description string `json:"description,omitempty"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Normalize grade name (uppercase, trim spaces)
+	req.Grade = strings.ToUpper(strings.TrimSpace(req.Grade))
+
+	// Validate grade format (basic oil & gas grade patterns)
+	if !isValidGradeFormat(req.Grade) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid grade format",
+			"note":  "Grade should follow oil & gas industry standards (e.g., J55, L80, P110)",
+		})
+		return
+	}
+
+	// Create grade through service
+	grade, err := h.services.Grade.Create(c.Request.Context(), req.Grade, req.Description)
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "already exists") {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "Grade already exists",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to create grade",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Grade created successfully",
+		"grade":   grade,
 	})
 }
 
 func (h *Handlers) DeleteGrade(c *gin.Context) {
-	// TODO: Implement grade deletion
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement grade deletion",
-		"note":    "Add to grade repository when needed",
+	gradeName := c.Param("grade")
+	if gradeName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Grade name is required",
+		})
+		return
+	}
+
+	gradeName = strings.ToUpper(strings.TrimSpace(gradeName))
+
+	// Check if grade is in use
+	inUse, err := h.services.Grade.IsInUse(c.Request.Context(), gradeName)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to check grade usage",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	if inUse {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "Cannot delete grade that is currently in use",
+			"note":  "Remove all inventory items with this grade first",
+		})
+		return
+	}
+
+	// Delete grade through service
+	err = h.services.Grade.Delete(c.Request.Context(), gradeName)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Grade not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to delete grade",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Grade deleted successfully",
 	})
+}
+
+func (h *Handlers) GetGradeUsage(c *gin.Context) {
+	gradeName := c.Param("grade")
+	if gradeName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Grade name is required",
+		})
+		return
+	}
+
+	gradeName = strings.ToUpper(strings.TrimSpace(gradeName))
+
+	// Get usage statistics for the grade
+	usage, err := h.services.Grade.GetUsageStats(c.Request.Context(), gradeName)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to get grade usage",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"grade": gradeName,
+		"usage": usage,
+	})
+}
+
+// Helper function to validate grade format
+func isValidGradeFormat(grade string) bool {
+	// Basic validation for oil & gas grade formats
+	// This can be expanded based on industry standards
+	if len(grade) < 2 || len(grade) > 10 {
+		return false
+	}
+
+	// Check for common patterns: letter+number combinations
+	// Examples: J55, L80, P110, Q125, etc.
+	validPattern := regexp.MustCompile(`^[A-Z]+[0-9]+[A-Z]*$`)
+	return validPattern.MatchString(grade)
 }
 
 // Placeholder handlers for other endpoints (implement as needed)
@@ -471,17 +736,192 @@ func (h *Handlers) DeleteBakeoutItem(c *gin.Context) {
 
 // Search handlers
 func (h *Handlers) SearchCustomers(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement customer search",
-		"note":    "Add to customer repository when needed",
+	query := c.Query("q")
+	if query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Search query parameter 'q' is required",
+		})
+		return
+	}
+
+	// Parse pagination
+	limit := 50
+	if limitParam := c.Query("limit"); limitParam != "" {
+		if l, err := strconv.Atoi(limitParam); err == nil && l > 0 && l <= 200 {
+			limit = l
+		}
+	}
+
+	offset := 0
+	if offsetParam := c.Query("offset"); offsetParam != "" {
+		if o, err := strconv.Atoi(offsetParam); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	// Search customers through service
+	customers, total, err := h.services.Customer.Search(c.Request.Context(), query, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Search failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"customers": customers,
+		"total":     total,
+		"query":     query,
+		"limit":     limit,
+		"offset":    offset,
 	})
 }
 
 func (h *Handlers) GlobalSearch(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement global search",
-		"note":    "Search across customers, inventory, received items",
+	query := c.Query("q")
+	if query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Search query parameter 'q' is required",
+		})
+		return
+	}
+
+	// Validate query length to prevent abuse
+	if len(strings.TrimSpace(query)) < 2 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Search query must be at least 2 characters",
+		})
+		return
+	}
+
+	// Parse search scope (optional filter)
+	scope := c.Query("scope") // "customers", "inventory", "all"
+	if scope == "" {
+		scope = "all"
+	}
+
+	// Parse pagination
+	limit := 20 // Lower default for global search
+	if limitParam := c.Query("limit"); limitParam != "" {
+		if l, err := strconv.Atoi(limitParam); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	offset := 0
+	if offsetParam := c.Query("offset"); offsetParam != "" {
+		if o, err := strconv.Atoi(offsetParam); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	// Perform global search through service
+	results, err := h.services.Search.GlobalSearch(c.Request.Context(), query, scope, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Global search failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Calculate totals by type
+	customerCount := len(results.Customers)
+	inventoryCount := len(results.Inventory)
+	totalResults := customerCount + inventoryCount
+
+	c.JSON(http.StatusOK, gin.H{
+		"results": gin.H{
+			"customers": results.Customers,
+			"inventory": results.Inventory,
+		},
+		"summary": gin.H{
+			"total_results":    totalResults,
+			"customer_count":   customerCount,
+			"inventory_count":  inventoryCount,
+		},
+		"query":  query,
+		"scope":  scope,
+		"limit":  limit,
+		"offset": offset,
 	})
+}
+
+// Quick search endpoint for autocomplete/suggestions
+func (h *Handlers) QuickSearch(c *gin.Context) {
+	query := c.Query("q")
+	if query == "" || len(strings.TrimSpace(query)) < 2 {
+		c.JSON(http.StatusOK, gin.H{
+			"suggestions": []interface{}{},
+		})
+		return
+	}
+
+	// Get quick suggestions (limited results for performance)
+	suggestions, err := h.services.Search.GetSuggestions(c.Request.Context(), query, 10)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to get suggestions",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"suggestions": suggestions,
+		"query":       query,
+	})
+}
+
+// Advanced search with multiple filters
+func (h *Handlers) AdvancedSearch(c *gin.Context) {
+	var searchReq struct {
+		Query       string            `json:"query"`
+		Filters     map[string]string `json:"filters"`
+		DateRange   *DateRange        `json:"date_range,omitempty"`
+		SortBy      string            `json:"sort_by"`
+		SortOrder   string            `json:"sort_order"`
+		Limit       int               `json:"limit"`
+		Offset      int               `json:"offset"`
+	}
+
+	if err := c.ShouldBindJSON(&searchReq); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid search request",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Set defaults
+	if searchReq.Limit == 0 || searchReq.Limit > 100 {
+		searchReq.Limit = 50
+	}
+	if searchReq.SortOrder != "asc" && searchReq.SortOrder != "desc" {
+		searchReq.SortOrder = "desc"
+	}
+
+	// Perform advanced search through service
+	results, total, err := h.services.Search.AdvancedSearch(c.Request.Context(), &searchReq)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Advanced search failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"results": results,
+		"total":   total,
+		"request": searchReq,
+	})
+}
+
+type DateRange struct {
+	StartDate string `json:"start_date"`
+	EndDate   string `json:"end_date"`
 }
 
 // Analytics handlers
