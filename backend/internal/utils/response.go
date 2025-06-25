@@ -1,137 +1,113 @@
+// backend/internal/utils/response.go
 package utils
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"oilgas-backend/internal/models"
 )
 
-// StandardResponse represents the standard API response format
-type StandardResponse struct {
-	Success   bool        `json:"success"`
-	Message   string      `json:"message,omitempty"`
-	Data      interface{} `json:"data,omitempty"`
-	Error     interface{} `json:"error,omitempty"`
-	Timestamp time.Time   `json:"timestamp"`
+// APIResponse represents a standard API response
+type APIResponse struct {
+	Success bool        `json:"success"`
+	Message string      `json:"message,omitempty"`
+	Data    interface{} `json:"data,omitempty"`
+	Error   string      `json:"error,omitempty"`
 }
 
 // PaginatedResponse represents a paginated API response
 type PaginatedResponse struct {
-	Success    bool                `json:"success"`
-	Message    string              `json:"message,omitempty"`
-	Data       interface{}         `json:"data"`
-	Pagination *models.Pagination  `json:"pagination"`
-	Error      interface{}         `json:"error,omitempty"`
-	Timestamp  time.Time           `json:"timestamp"`
+	APIResponse
+	Total  int `json:"total"`
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+	Pages  int `json:"pages"`
 }
 
-// SuccessResponse sends a successful response
-func SuccessResponse(c *gin.Context, data interface{}) {
-	response := StandardResponse{
-		Success:   true,
-		Data:      data,
-		Timestamp: time.Now(),
-	}
-	c.JSON(http.StatusOK, response)
+// ValidationErrorResponse represents validation error response
+type ValidationErrorResponse struct {
+	APIResponse
+	ValidationErrors []ValidationError `json:"validation_errors"`
 }
 
-// CreatedResponse sends a created response (201)
-func CreatedResponse(c *gin.Context, data interface{}) {
-	response := StandardResponse{
-		Success:   true,
-		Message:   "Resource created successfully",
-		Data:      data,
-		Timestamp: time.Now(),
-	}
-	c.JSON(http.StatusCreated, response)
+type ValidationError struct {
+	Field   string `json:"field"`
+	Value   string `json:"value"`
+	Message string `json:"message"`
 }
 
-// ErrorResponse sends an error response
-func ErrorResponse(c *gin.Context, statusCode int, message string, err error) {
-	response := StandardResponse{
-		Success:   false,
-		Message:   message,
-		Timestamp: time.Now(),
-	}
+// Success sends a successful response
+func Success(c *gin.Context, data interface{}, message string) {
+	c.JSON(http.StatusOK, APIResponse{
+		Success: true,
+		Message: message,
+		Data:    data,
+	})
+}
 
-	// Include error details in development mode
-	if gin.Mode() == gin.DebugMode && err != nil {
-		response.Error = gin.H{
-			"details": err.Error(),
-		}
-	}
+// SuccessResponse is an alias for Success (for backward compatibility)
+func SuccessResponse(c *gin.Context, data interface{}, message string) {
+	Success(c, data, message)
+}
 
+// SuccessWithPagination sends a successful paginated response
+func SuccessWithPagination(c *gin.Context, data interface{}, total, limit, offset int, message string) {
+	pages := (total + limit - 1) / limit // Calculate total pages
+	
+	c.JSON(http.StatusOK, PaginatedResponse{
+		APIResponse: APIResponse{
+			Success: true,
+			Message: message,
+			Data:    data,
+		},
+		Total:  total,
+		Limit:  limit,
+		Offset: offset,
+		Pages:  pages,
+	})
+}
+
+// Error sends an error response
+func Error(c *gin.Context, statusCode int, message string, err error) {
+	response := APIResponse{
+		Success: false,
+		Message: message,
+	}
+	
+	if err != nil {
+		response.Error = err.Error()
+	}
+	
 	c.JSON(statusCode, response)
 }
 
-// PaginatedResponse sends a paginated response
-func PaginatedResponse(c *gin.Context, data interface{}, pagination *models.Pagination) {
-	response := PaginatedResponse{
-		Success:    true,
-		Data:       data,
-		Pagination: pagination,
-		Timestamp:  time.Now(),
-	}
-	c.JSON(http.StatusOK, response)
+// ErrorResponse is an alias for Error (for backward compatibility)
+func ErrorResponse(c *gin.Context, statusCode int, message string, err error) {
+	Error(c, statusCode, message, err)
 }
 
-// ValidationErrorResponse sends a validation error response
-func ValidationErrorResponse(c *gin.Context, errors map[string]string) {
-	response := StandardResponse{
-		Success:   false,
-		Message:   "Validation failed",
-		Error:     errors,
-		Timestamp: time.Now(),
-	}
-	c.JSON(http.StatusBadRequest, response)
+// ValidationError sends a validation error response
+func ValidationErrors(c *gin.Context, errors []ValidationError, message string) {
+	c.JSON(http.StatusBadRequest, ValidationErrorResponse{
+		APIResponse: APIResponse{
+			Success: false,
+			Message: message,
+		},
+		ValidationErrors: errors,
+	})
 }
 
-// NotFoundResponse sends a not found response
-func NotFoundResponse(c *gin.Context, resource string) {
-	response := StandardResponse{
-		Success:   false,
-		Message:   resource + " not found",
-		Timestamp: time.Now(),
-	}
-	c.JSON(http.StatusNotFound, response)
+// NotFound sends a 404 response
+func NotFound(c *gin.Context, resource string) {
+	Error(c, http.StatusNotFound, resource+" not found", nil)
 }
 
-// UnauthorizedResponse sends an unauthorized response
-func UnauthorizedResponse(c *gin.Context, message string) {
-	if message == "" {
-		message = "Unauthorized access"
-	}
-	
-	response := StandardResponse{
-		Success:   false,
-		Message:   message,
-		Timestamp: time.Now(),
-	}
-	c.JSON(http.StatusUnauthorized, response)
+// BadRequest sends a 400 response
+func BadRequest(c *gin.Context, message string, err error) {
+	Error(c, http.StatusBadRequest, message, err)
 }
 
-// ForbiddenResponse sends a forbidden response
-func ForbiddenResponse(c *gin.Context, message string) {
-	if message == "" {
-		message = "Access forbidden"
-	}
-	
-	response := StandardResponse{
-		Success:   false,
-		Message:   message,
-		Timestamp: time.Now(),
-	}
-	c.JSON(http.StatusForbidden, response)
-}
-
-// ConflictResponse sends a conflict response
-func ConflictResponse(c *gin.Context, message string) {
-	response := StandardResponse{
-		Success:   false,
-		Message:   message,
-		Timestamp: time.Now(),
-	}
-	c.JSON(http.StatusConflict, response)
+// InternalServerError sends a 500 response
+func InternalServerError(c *gin.Context, message string, err error) {
+	Error(c, http.StatusInternalServerError, message, err)
 }

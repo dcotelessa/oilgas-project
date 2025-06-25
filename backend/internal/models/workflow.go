@@ -84,14 +84,6 @@ type Job struct {
 	UpdatedAt    *time.Time             `json:"updated_at,omitempty" db:"updated_at"`
 }
 
-// JobSummary represents aggregated job data for dashboard
-type JobSummary struct {
-	State        WorkflowState `json:"state"`
-	Count        int           `json:"count"`
-	TotalJoints  int           `json:"total_joints"`
-	AvgDays      float64       `json:"avg_days_in_state,omitempty"`
-}
-
 // InspectionResult represents inspection data
 type InspectionResult struct {
 	ID          int         `json:"id" db:"id"`
@@ -111,43 +103,6 @@ type InspectionResult struct {
 	Complete    bool        `json:"complete" db:"complete"`
 }
 
-// InventoryItem represents pipe inventory
-type InventoryItem struct {
-	ID          int         `json:"id" db:"id"`
-	WorkOrder   string      `json:"work_order,omitempty" db:"wkorder"`
-	RNumber     *int        `json:"r_number,omitempty" db:"rnumber"`
-	CustomerID  int         `json:"customer_id" db:"custid"`
-	Customer    string      `json:"customer" db:"customer"`
-	Joints      int         `json:"joints" db:"joints"`
-	Rack        string      `json:"rack,omitempty" db:"rack"`
-	Size        string      `json:"size" db:"size"`
-	Weight      string      `json:"weight" db:"weight"`
-	Grade       string      `json:"grade" db:"grade"`
-	Connection  string      `json:"connection" db:"connection"`
-	CTD         bool        `json:"ctd" db:"ctd"`
-	WString     bool        `json:"wstring" db:"wstring"`
-	SWGCC       string      `json:"swgcc" db:"swgcc"`
-	Color       string      `json:"color" db:"color"`
-	CN          ColorNumber `json:"cn" db:"cn"`
-	CustomerPO  string      `json:"customer_po,omitempty" db:"customerpo"`
-	DateIn      *time.Time  `json:"date_in,omitempty" db:"datein"`
-	DateOut     *time.Time  `json:"date_out,omitempty" db:"dateout"`
-	Location    string      `json:"location,omitempty" db:"location"`
-}
-
-// Customer represents customer data
-type Customer struct {
-	ID             int    `json:"id" db:"custid"`
-	Name           string `json:"name" db:"customer"`
-	BillingAddress string `json:"billing_address,omitempty" db:"billingaddress"`
-	BillingCity    string `json:"billing_city,omitempty" db:"billingcity"`
-	BillingState   string `json:"billing_state,omitempty" db:"billingstate"`
-	BillingZip     string `json:"billing_zip,omitempty" db:"billingzipcode"`
-	Contact        string `json:"contact,omitempty" db:"contact"`
-	Phone          string `json:"phone,omitempty" db:"phone"`
-	Email          string `json:"email,omitempty" db:"email"`
-	Deleted        bool   `json:"deleted" db:"deleted"`
-}
 
 // PipeSize represents size/weight/connection combinations
 type PipeSize struct {

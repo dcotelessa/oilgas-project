@@ -5,44 +5,12 @@ import (
 	"sync"
 	"time"
 )
+import "oilgas-backend/internal/models"
 
-// Domain models for oil & gas inventory
-type Customer struct {
-	ID              int       `json:"id"`
-	Name            string    `json:"name"`
-	BillingAddress  string    `json:"billing_address"`
-	BillingCity     string    `json:"billing_city"`
-	BillingState    string    `json:"billing_state"`
-	BillingZipcode  string    `json:"billing_zipcode"`
-	Contact         string    `json:"contact"`
-	Phone           string    `json:"phone"`
-	Email           string    `json:"email"`
-	Deleted         bool      `json:"deleted"`
-	CreatedAt       time.Time `json:"created_at"`
-}
-
-type InventoryItem struct {
-	ID         int       `json:"id"`
-	CustomerID int       `json:"customer_id"`
-	Customer   string    `json:"customer"`
-	Joints     int       `json:"joints"`
-	Rack       string    `json:"rack"`
-	Size       string    `json:"size"`
-	Weight     string    `json:"weight"`
-	Grade      string    `json:"grade"`
-	Connection string    `json:"connection"`
-	CTD        bool      `json:"ctd"`
-	WString    bool      `json:"wstring"`
-	Color      string    `json:"color"`
-	Location   string    `json:"location"`
-	DateIn     time.Time `json:"date_in"`
-	DateOut    time.Time `json:"date_out"`
-	Deleted    bool      `json:"deleted"`
-}
-
-type Grade struct {
-	Grade string `json:"grade"`
-}
+type Customer = models.Customer
+type InventoryItem = models.InventoryItem
+type Grade = models.Grade
+type SearchResult = models.SearchResult
 
 // Cache item with expiration
 type cacheItem struct {

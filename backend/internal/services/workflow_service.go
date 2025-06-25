@@ -1,455 +1,304 @@
+// backend/internal/services/workflow_service.go
 package services
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"oilgas-backend/internal/models"
 	"oilgas-backend/internal/repository"
-	"oilgas-backend/pkg/cache"
 )
 
 type WorkflowService struct {
-	repo  repository.WorkflowRepository
-	cache cache.Cache
+	repos *repository.Repositories
+	cache CacheService
 }
 
-func NewWorkflowService(repo repository.WorkflowRepository, cache cache.Cache) *WorkflowService {
+func NewWorkflowService(repos *repository.Repositories, cache CacheService) *WorkflowService {
 	return &WorkflowService{
-		repo:  repo,
+		repos: repos,
 		cache: cache,
 	}
 }
 
-// Dashboard operations with caching
-func (s *WorkflowService) GetDashboardStats(ctx context.Context) (*models.DashboardStats, error) {
+type WorkflowStats struct {
+	TotalItems      int                    `json:"total_items"`
+	TotalJoints     int                    `json:"total_joints"`
+	ItemsByCustomer map[string]int         `json:"items_by_customer"`
+	ItemsByGrade    map[string]int         `json:"items_by_grade"`
+	ItemsByStatus   map[string]int         `json:"items_by_status"`
+	ItemsByLocation map[string]int         `json:"items_by_location"`
+	RecentActivity  []WorkflowActivity     `json:"recent_activity"`
+	Alerts          []WorkflowAlert        `json:"alerts"`
+	LastUpdated     time.Time              `json:"last_updated"`
+}
+
+type WorkflowActivity struct {
+	ID          int       `json:"id"`
+	Type        string    `json:"type"`
+	Description string    `json:"description"`
+	CustomerID  int       `json:"customer_id"`
+	Customer    string    `json:"customer"`
+	Timestamp   time.Time `json:"timestamp"`
+}
+
+type WorkflowAlert struct {
+	Type        string    `json:"type"`
+	Severity    string    `json:"severity"`
+	Message     string    `json:"message"`
+	ItemID      *int      `json:"item_id,omitempty"`
+	CustomerID  *int      `json:"customer_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func (s *WorkflowService) GetDashboardStats(ctx context.Context) (*WorkflowStats, error) {
 	// Try cache first
-	if stats, exists := s.cache.GetDashboardStats(); exists {
-		return stats, nil
+	if cached := s.cache.GetWorkflowStats(); cached != nil {
+		return cached, nil
 	}
 
-	// Fetch from repository
-	stats, err := s.repo.GetDashboardStats(ctx)
+	// Use your existing GetSummary method which already has the data we need
+	summary, err := s.repos.Inventory.GetSummary(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get dashboard stats: %w", err)
+		return nil, fmt.Errorf("failed to get inventory summary: %w", err)
 	}
 
-	// Cache for 5 minutes
-	s.cache.CacheDashboardStats(stats)
+	// Get recent items for activity and alerts
+	recentItems, _, err := s.repos.Inventory.GetFiltered(ctx, map[string]interface{}{}, 20, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recent items: %w", err)
+	}
+
+	// Convert summary to workflow stats format
+	stats := &WorkflowStats{
+		TotalItems:      summary.TotalItems,
+		TotalJoints:     summary.TotalJoints,
+		ItemsByCustomer: summary.ItemsByCustomer,
+		ItemsByGrade:    summary.ItemsByGrade,
+		ItemsByStatus:   make(map[string]int),
+		ItemsByLocation: summary.ItemsByLocation,
+		RecentActivity:  []WorkflowActivity{},
+		Alerts:          []WorkflowAlert{},
+		LastUpdated:     summary.LastUpdated,
+	}
+
+	// Process recent items for status counts and activities
+	for _, item := range recentItems {
+		// Count by status
+		status := determineItemStatus(&item)
+		stats.ItemsByStatus[status]++
+	}
+
+	// Get recent activity from the summary's recent activity
+	for _, item := range summary.RecentActivity {
+		status := determineItemStatus(&item)
+		activity := WorkflowActivity{
+			ID:          item.ID,
+			CustomerID:  item.CustomerID,
+			Customer:    item.Customer,
+			Timestamp:   item.CreatedAt,
+		}
+
+		// Set activity type and description based on status
+		switch status {
+		case "pending":
+			activity.Type = "received"
+			activity.Description = fmt.Sprintf("Received %d joints of %s %s from %s", 
+				item.Joints, item.Size, item.Grade, item.Customer)
+		case "in_progress", "threading":
+			activity.Type = "started"
+			activity.Description = fmt.Sprintf("Started processing %d joints of %s %s", 
+				item.Joints, item.Size, item.Grade)
+		case "completed":
+			activity.Type = "completed"
+			activity.Description = fmt.Sprintf("Completed processing %d joints of %s %s", 
+				item.Joints, item.Size, item.Grade)
+		default:
+			activity.Type = "updated"
+			activity.Description = fmt.Sprintf("Updated %d joints of %s %s at %s", 
+				item.Joints, item.Size, item.Grade, item.Location)
+		}
+
+		stats.RecentActivity = append(stats.RecentActivity, activity)
+	}
+
+	// Generate alerts based on recent items
+	alerts := s.generateAlerts(recentItems)
+	stats.Alerts = alerts
+
+	// Cache the results
+	s.cache.SetWorkflowStats(stats, 5*time.Minute)
+
 	return stats, nil
 }
 
-func (s *WorkflowService) GetJobSummaries(ctx context.Context) ([]models.JobSummary, error) {
-	// Try cache first
-	cacheKey := "job_summaries"
-	if cached, exists := s.cache.Get(cacheKey); exists {
-		if summaries, ok := cached.([]models.JobSummary); ok {
-			return summaries, nil
-		}
-	}
-
-	summaries, err := s.repo.GetJobSummaries(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get job summaries: %w", err)
-	}
-
-	// Cache for 2 minutes
-	s.cache.Set(cacheKey, summaries, 2*time.Minute)
-	return summaries, nil
-}
-
-func (s *WorkflowService) GetRecentActivity(ctx context.Context, limit int) ([]models.Job, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-
-	return s.repo.GetRecentActivity(ctx, limit)
-}
-
-// Job operations
-func (s *WorkflowService) GetJobs(ctx context.Context, filters repository.JobFilters) ([]models.Job, *models.Pagination, error) {
-	filters.NormalizePagination()
-	
-	jobs, pagination, err := s.repo.GetJobs(ctx, filters)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get jobs: %w", err)
-	}
-
-	// Set current state for each job
-	for i := range jobs {
-		jobs[i].CurrentState = jobs[i].GetCurrentState()
-	}
-
-	return jobs, pagination, nil
-}
-
-func (s *WorkflowService) GetJobByID(ctx context.Context, id int) (*models.Job, error) {
-	// Try cache first
-	if job, exists := s.cache.GetJob(id); exists {
-		return job, nil
-	}
-
-	job, err := s.repo.GetJobByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get job %d: %w", id, err)
-	}
-
-	if job != nil {
-		job.CurrentState = job.GetCurrentState()
-		s.cache.CacheJob(id, job)
-	}
-
-	return job, nil
-}
-
-func (s *WorkflowService) GetJobByWorkOrder(ctx context.Context, workOrder string) (*models.Job, error) {
-	job, err := s.repo.GetJobByWorkOrder(ctx, workOrder)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get job %s: %w", workOrder, err)
-	}
-
-	if job != nil {
-		job.CurrentState = job.GetCurrentState()
-		s.cache.CacheJob(job.ID, job)
-	}
-
-	return job, nil
-}
-
-func (s *WorkflowService) CreateJob(ctx context.Context, job *models.Job) error {
-	// Validate job data
-	if err := s.validateJob(job); err != nil {
-		return fmt.Errorf("invalid job data: %w", err)
-	}
-
-	// Set initial state
-	job.CurrentState = models.StateReceiving
-	if job.DateReceived == nil {
-		now := time.Now()
-		job.DateReceived = &now
-	}
-
-	err := s.repo.CreateJob(ctx, job)
-	if err != nil {
-		return fmt.Errorf("failed to create job: %w", err)
-	}
-
-	// Invalidate relevant caches
-	s.invalidateJobCaches()
-	
-	log.Printf("Created job %s for customer %s", job.WorkOrder, job.Customer)
-	return nil
-}
-
-func (s *WorkflowService) UpdateJob(ctx context.Context, job *models.Job) error {
-	if err := s.validateJob(job); err != nil {
-		return fmt.Errorf("invalid job data: %w", err)
-	}
-
-	// Update current state
-	job.CurrentState = job.GetCurrentState()
+func (s *WorkflowService) generateAlerts(items []models.InventoryItem) []WorkflowAlert {
+	alerts := []WorkflowAlert{}
 	now := time.Now()
-	job.UpdatedAt = &now
 
-	err := s.repo.UpdateJob(ctx, job)
-	if err != nil {
-		return fmt.Errorf("failed to update job: %w", err)
-	}
+	for _, item := range items {
+		// Check for overdue items
+		if item.DateIn != nil && item.DateOut == nil {
+			daysSinceStart := int(now.Sub(*item.DateIn).Hours() / 24)
+			if daysSinceStart > 7 {
+				alerts = append(alerts, WorkflowAlert{
+					Type:       "overdue",
+					Severity:   "warning",
+					Message:    fmt.Sprintf("Work order %s has been in progress for %d days", item.WorkOrder, daysSinceStart),
+					ItemID:     &item.ID,
+					CustomerID: &item.CustomerID,
+					CreatedAt:  now,
+				})
+			}
+		}
 
-	// Invalidate caches
-	s.cache.Delete(fmt.Sprintf("job_%d", job.ID))
-	s.invalidateJobCaches()
+		// Check for missing location
+		if item.Location == "" {
+			alerts = append(alerts, WorkflowAlert{
+				Type:       "missing_data",
+				Severity:   "info",
+				Message:    fmt.Sprintf("Item %d is missing location information", item.ID),
+				ItemID:     &item.ID,
+				CustomerID: &item.CustomerID,
+				CreatedAt:  now,
+			})
+		}
 
-	return nil
-}
-
-func (s *WorkflowService) AdvanceJobToProduction(ctx context.Context, workOrder string) error {
-	job, err := s.GetJobByWorkOrder(ctx, workOrder)
-	if err != nil {
-		return err
-	}
-
-	if job.GetCurrentState() != models.StateReceiving {
-		return fmt.Errorf("job %s is not in RECEIVING state", workOrder)
-	}
-
-	now := time.Now()
-	job.InProduction = &now
-	
-	return s.UpdateJob(ctx, job)
-}
-
-func (s *WorkflowService) AdvanceJobToInspection(ctx context.Context, workOrder string, inspectedBy string) error {
-	job, err := s.GetJobByWorkOrder(ctx, workOrder)
-	if err != nil {
-		return err
-	}
-
-	if job.GetCurrentState() != models.StateProduction {
-		return fmt.Errorf("job %s is not in PRODUCTION state", workOrder)
-	}
-
-	now := time.Now()
-	job.Inspected = &now
-	job.InspectedBy = inspectedBy
-	job.Complete = true
-
-	return s.UpdateJob(ctx, job)
-}
-
-func (s *WorkflowService) MoveJobToInventory(ctx context.Context, workOrder string) error {
-	job, err := s.GetJobByWorkOrder(ctx, workOrder)
-	if err != nil {
-		return err
-	}
-
-	if job.GetCurrentState() != models.StateInspection {
-		return fmt.Errorf("job %s is not in INSPECTION state", workOrder)
-	}
-
-	now := time.Now()
-	job.DateIn = &now
-
-	return s.UpdateJob(ctx, job)
-}
-
-// Inspection operations
-func (s *WorkflowService) GetInspectionResults(ctx context.Context, workOrder string) ([]models.InspectionResult, error) {
-	return s.repo.GetInspectionResults(ctx, workOrder)
-}
-
-func (s *WorkflowService) CreateInspectionResult(ctx context.Context, result *models.InspectionResult) error {
-	if err := s.validateInspectionResult(result); err != nil {
-		return fmt.Errorf("invalid inspection result: %w", err)
-	}
-
-	err := s.repo.CreateInspectionResult(ctx, result)
-	if err != nil {
-		return fmt.Errorf("failed to create inspection result: %w", err)
-	}
-
-	// Invalidate caches
-	s.invalidateJobCaches()
-	return nil
-}
-
-// Inventory operations
-func (s *WorkflowService) GetInventory(ctx context.Context, filters repository.InventoryFilters) ([]models.InventoryItem, *models.Pagination, error) {
-	filters.NormalizePagination()
-	return s.repo.GetInventory(ctx, filters)
-}
-
-func (s *WorkflowService) GetInventoryByCustomer(ctx context.Context, customerID int) ([]models.InventoryItem, error) {
-	// Try cache first
-	cacheKey := fmt.Sprintf("inventory_customer_%d", customerID)
-	if cached, exists := s.cache.Get(cacheKey); exists {
-		if items, ok := cached.([]models.InventoryItem); ok {
-			return items, nil
+		// Check for items without rack assignment
+		if item.Rack == "" && item.Location != "" {
+			alerts = append(alerts, WorkflowAlert{
+				Type:       "missing_data",
+				Severity:   "info",
+				Message:    fmt.Sprintf("Item %d at %s needs rack assignment", item.ID, item.Location),
+				ItemID:     &item.ID,
+				CustomerID: &item.CustomerID,
+				CreatedAt:  now,
+			})
 		}
 	}
 
-	items, err := s.repo.GetInventoryByCustomer(ctx, customerID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get inventory for customer %d: %w", customerID, err)
+	// Check for high-volume customers
+	customerCounts := make(map[int]int)
+	for _, item := range items {
+		customerCounts[item.CustomerID]++
 	}
 
-	// Cache for 5 minutes
-	s.cache.Set(cacheKey, items, 5*time.Minute)
-	return items, nil
-}
-
-func (s *WorkflowService) ShipInventory(ctx context.Context, itemIDs []int, shipmentDetails map[string]interface{}) error {
-	if len(itemIDs) == 0 {
-		return fmt.Errorf("no items specified for shipping")
-	}
-
-	err := s.repo.ShipInventory(ctx, itemIDs, shipmentDetails)
-	if err != nil {
-		return fmt.Errorf("failed to ship inventory: %w", err)
-	}
-
-	// Invalidate relevant caches
-	s.invalidateInventoryCaches()
-	s.invalidateJobCaches()
-
-	log.Printf("Shipped %d inventory items", len(itemIDs))
-	return nil
-}
-
-// Customer operations
-func (s *WorkflowService) GetCustomers(ctx context.Context, includeDeleted bool) ([]models.Customer, error) {
-	// Try cache first
-	cacheKey := fmt.Sprintf("customers_deleted_%v", includeDeleted)
-	if cached, exists := s.cache.Get(cacheKey); exists {
-		if customers, ok := cached.([]models.Customer); ok {
-			return customers, nil
+	for customerID, count := range customerCounts {
+		if count > 10 { // Adjust threshold as needed
+			alerts = append(alerts, WorkflowAlert{
+				Type:       "high_volume",
+				Severity:   "info",
+				Message:    fmt.Sprintf("Customer has %d active items in inventory", count),
+				CustomerID: &customerID,
+				CreatedAt:  now,
+			})
 		}
 	}
 
-	customers, err := s.repo.GetCustomers(ctx, includeDeleted)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get customers: %w", err)
-	}
-
-	// Cache for 10 minutes
-	s.cache.Set(cacheKey, customers, 10*time.Minute)
-	return customers, nil
+	return alerts
 }
 
-func (s *WorkflowService) GetCustomerByID(ctx context.Context, id int) (*models.Customer, error) {
-	// Try cache first
-	if customer, exists := s.cache.GetCustomer(id); exists {
-		return customer, nil
-	}
-
-	customer, err := s.repo.GetCustomerByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get customer %d: %w", id, err)
-	}
-
-	if customer != nil {
-		s.cache.CacheCustomer(id, customer)
-	}
-
-	return customer, nil
-}
-
-func (s *WorkflowService) CreateCustomer(ctx context.Context, customer *models.Customer) error {
-	if err := s.validateCustomer(customer); err != nil {
-		return fmt.Errorf("invalid customer data: %w", err)
-	}
-
-	err := s.repo.CreateCustomer(ctx, customer)
-	if err != nil {
-		return fmt.Errorf("failed to create customer: %w", err)
-	}
-
-	// Invalidate customer cache
-	s.cache.Delete("customers_deleted_false")
-	s.cache.Delete("customers_deleted_true")
-
-	log.Printf("Created customer: %s", customer.Name)
-	return nil
-}
-
-// Grades
-func (s *WorkflowService) GetGrades(ctx context.Context) ([]string, error) {
-	// Try cache first
-	cacheKey := "grades"
-	if cached, exists := s.cache.Get(cacheKey); exists {
-		if grades, ok := cached.([]string); ok {
-			return grades, nil
+func (s *WorkflowService) GetCustomerWorkflow(ctx context.Context, customerID int) (*CustomerWorkflowSummary, error) {
+	cacheKey := fmt.Sprintf("customer_workflow_%d", customerID)
+	if cached := s.cache.Get(cacheKey); cached != nil {
+		if summary, ok := cached.(*CustomerWorkflowSummary); ok {
+			return summary, nil
 		}
 	}
 
-	grades, err := s.repo.GetGrades(ctx)
+	// Get customer info
+	customer, err := s.repos.Customer.GetByID(ctx, customerID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get grades: %w", err)
+		return nil, fmt.Errorf("failed to get customer: %w", err)
 	}
 
-	// Cache for 30 minutes (grades don't change often)
-	s.cache.Set(cacheKey, grades, 30*time.Minute)
-	return grades, nil
+	// Get customer's items using your existing filtering
+	filters := map[string]interface{}{
+		"customer_id": customerID,
+	}
+	items, total, err := s.repos.Inventory.GetFiltered(ctx, filters, 100, 0) // Get up to 100 items
+	if err != nil {
+		return nil, fmt.Errorf("failed to get customer items: %w", err)
+	}
+
+	summary := &CustomerWorkflowSummary{
+		Customer:      *customer,
+		TotalItems:    total,
+		ItemsByStatus: make(map[string]int),
+		ItemsByGrade:  make(map[string]int),
+		Items:         items,
+	}
+
+	// Calculate status and grade distributions
+	for _, item := range items {
+		status := determineItemStatus(&item)
+		summary.ItemsByStatus[status]++
+		summary.ItemsByGrade[item.Grade]++
+	}
+
+	s.cache.Set(cacheKey, summary, 10*time.Minute)
+	return summary, nil
 }
 
-// Validation functions
-func (s *WorkflowService) validateJob(job *models.Job) error {
-	if job.WorkOrder == "" {
-		return fmt.Errorf("work order is required")
-	}
-	if job.CustomerID <= 0 {
-		return fmt.Errorf("valid customer ID is required")
-	}
-	if job.Customer == "" {
-		return fmt.Errorf("customer name is required")
-	}
-	if job.Size == "" {
-		return fmt.Errorf("pipe size is required")
-	}
-	if job.Weight == "" {
-		return fmt.Errorf("pipe weight is required")
-	}
-	if job.Grade == "" {
-		return fmt.Errorf("pipe grade is required")
-	}
-	if job.Connection == "" {
-		return fmt.Errorf("pipe connection is required")
-	}
-	if job.Joints <= 0 {
-		return fmt.Errorf("joints count must be positive")
-	}
-	return nil
+func (s *WorkflowService) SearchInventory(ctx context.Context, query string, limit, offset int) ([]models.InventoryItem, int, error) {
+	// Use your existing search method
+	return s.repos.Inventory.Search(ctx, query, limit, offset)
 }
 
-func (s *WorkflowService) validateInspectionResult(result *models.InspectionResult) error {
-	if result.WorkOrder == "" {
-		return fmt.Errorf("work order is required")
-	}
-	if result.Color == "" {
-		return fmt.Errorf("color is required")
-	}
-	if result.Joints < 0 {
-		return fmt.Errorf("joints count cannot be negative")
-	}
-	if result.Accept < 0 {
-		return fmt.Errorf("accept count cannot be negative")
-	}
-	if result.Reject < 0 {
-		return fmt.Errorf("reject count cannot be negative")
-	}
-	if result.Accept+result.Reject > result.Joints {
-		return fmt.Errorf("accept + reject cannot exceed total joints")
-	}
-	return nil
+type CustomerWorkflowSummary struct {
+	Customer      models.Customer       `json:"customer"`
+	TotalItems    int                   `json:"total_items"`
+	ItemsByStatus map[string]int        `json:"items_by_status"`
+	ItemsByGrade  map[string]int        `json:"items_by_grade"`
+	Items         []models.InventoryItem `json:"items"`
 }
 
-func (s *WorkflowService) validateCustomer(customer *models.Customer) error {
-	if customer.Name == "" {
-		return fmt.Errorf("customer name is required")
-	}
-	// Email validation if provided
-	if customer.Email != "" {
-		// Basic email validation
-		if len(customer.Email) < 5 || !contains(customer.Email, "@") {
-			return fmt.Errorf("invalid email format")
-		}
-	}
-	return nil
-}
-
-// Cache invalidation helpers
-func (s *WorkflowService) invalidateJobCaches() {
-	// Invalidate dashboard and summary caches
-	s.cache.Delete("dashboard_stats")
-	s.cache.Delete("job_summaries")
-	
-	// Note: Individual job caches are invalidated when jobs are updated
-}
-
-func (s *WorkflowService) invalidateInventoryCaches() {
-	// Pattern-based cache invalidation would be ideal here
-	// For now, we'll clear specific known patterns
-	keys := []string{
-		"dashboard_stats",
-		"job_summaries",
+// Enhanced status determination based on oil & gas workflow
+func determineItemStatus(item *models.InventoryItem) string {
+	if item.Deleted {
+		return "deleted"
 	}
 	
-	for _, key := range keys {
-		s.cache.Delete(key)
+	// More detailed status based on oil & gas workflow
+	if item.DateOut != nil {
+		return "completed"
 	}
 	
-	// Could also iterate through cache keys matching pattern "inventory_customer_*"
-	// but that depends on cache implementation
-}
-
-// Helper functions
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
+	if item.DateIn != nil {
+		// Item is being processed - check specific stages
+		if item.Fletcher != "" {
+			return "threading" // In fletcher/threading stage
+		}
+		return "in_progress" // General processing
+	}
+	
+	// Check location-based status
+	if item.Location != "" {
+		switch item.Location {
+		case "SHIPPING", "LOADOUT":
+			return "ready_to_ship"
+		case "INSPECTION":
+			return "inspecting"
+		case "REPAIR":
+			return "repairing"
+		case "THREADING", "FLETCHER":
+			return "threading"
 		}
 	}
-	return false
+	
+	// Check if item has been received but not started
+	if item.RNumber > 0 {
+		return "received" // Has R-number but not started processing
+	}
+	
+	return "pending" // Default status
+}
+
+// Cache interface
+type CacheService interface {
+	GetWorkflowStats() *WorkflowStats
+	SetWorkflowStats(stats *WorkflowStats, ttl time.Duration)
+	Get(key string) interface{}
+	Set(key string, value interface{}, ttl time.Duration)
 }
