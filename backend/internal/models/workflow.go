@@ -1,0 +1,256 @@
+package models
+
+import (
+	"time"
+)
+
+// WorkflowState represents the current state in the pipe processing workflow
+type WorkflowState string
+
+const (
+	StateReceiving  WorkflowState = "RECEIVING"
+	StateProduction WorkflowState = "PRODUCTION"
+	StateInspection WorkflowState = "INSPECTION"
+	StateInventory  WorkflowState = "INVENTORY"
+	StateShipping   WorkflowState = "SHIPPING"
+	StateCompleted  WorkflowState = "COMPLETED"
+)
+
+// ColorNumber represents the CN (Color Number) classification
+type ColorNumber int
+
+const (
+	CNPremium   ColorNumber = 1 // WHT - White (Premium Quality)
+	CNStandard  ColorNumber = 2 // BLU - Blue (Standard Quality)
+	CNEconomy   ColorNumber = 3 // GRN - Green (Economy Quality)
+	CNRejected  ColorNumber = 4 // RED - Red (Rejected/Problem)
+	CNGrade5    ColorNumber = 5 // Grade 5 Quality
+	CNGrade6    ColorNumber = 6 // Grade 6 Quality
+)
+
+// Job represents a complete work order with workflow state
+type Job struct {
+	ID           int                    `json:"id" db:"id"`
+	WorkOrder    string                 `json:"work_order" db:"wkorder"`
+	RNumber      *int                   `json:"r_number,omitempty" db:"rnumber"`
+	CustomerID   int                    `json:"customer_id" db:"custid"`
+	Customer     string                 `json:"customer" db:"customer"`
+	CustomerPO   string                 `json:"customer_po,omitempty" db:"customerpo"`
+	
+	// Pipe specifications
+	Size         string                 `json:"size" db:"size"`
+	Weight       string                 `json:"weight" db:"weight"`
+	Grade        string                 `json:"grade" db:"grade"`
+	Connection   string                 `json:"connection" db:"connection"`
+	Joints       int                    `json:"joints" db:"joints"`
+	CTD          bool                   `json:"ctd" db:"ctd"`
+	WString      bool                   `json:"wstring" db:"wstring"`
+	SWGCC        string                 `json:"swgcc" db:"swgcc"`
+	
+	// Location and logistics
+	Well         string                 `json:"well,omitempty" db:"well"`
+	Lease        string                 `json:"lease,omitempty" db:"lease"`
+	Rack         string                 `json:"rack,omitempty" db:"rack"`
+	Location     string                 `json:"location,omitempty" db:"location"`
+	Trucking     string                 `json:"trucking,omitempty" db:"trucking"`
+	Trailer      string                 `json:"trailer,omitempty" db:"trailer"`
+	
+	// Workflow dates - used to determine state
+	DateReceived *time.Time             `json:"date_received,omitempty" db:"daterecvd"`
+	InProduction *time.Time             `json:"in_production,omitempty" db:"inproduction"`
+	Inspected    *time.Time             `json:"inspected,omitempty" db:"inspected"`
+	DateIn       *time.Time             `json:"date_in,omitempty" db:"datein"`
+	DateOut      *time.Time             `json:"date_out,omitempty" db:"dateout"`
+	
+	// Workflow flags
+	Complete     bool                   `json:"complete" db:"complete"`
+	Deleted      bool                   `json:"deleted" db:"deleted"`
+	
+	// People
+	OrderedBy    string                 `json:"ordered_by,omitempty" db:"orderedby"`
+	EnteredBy    string                 `json:"entered_by,omitempty" db:"enteredby"`
+	InspectedBy  string                 `json:"inspected_by,omitempty" db:"inspectedby"`
+	
+	// Notes and services
+	Notes        string                 `json:"notes,omitempty" db:"notes"`
+	Services     string                 `json:"services,omitempty" db:"services"`
+	Background   string                 `json:"background,omitempty" db:"background"`
+	
+	// Computed fields
+	CurrentState WorkflowState          `json:"current_state"`
+	ColorDetails map[ColorNumber]int    `json:"color_details,omitempty"` // CN -> joints count
+	
+	CreatedAt    time.Time              `json:"created_at" db:"created_at"`
+	UpdatedAt    *time.Time             `json:"updated_at,omitempty" db:"updated_at"`
+}
+
+// JobSummary represents aggregated job data for dashboard
+type JobSummary struct {
+	State        WorkflowState `json:"state"`
+	Count        int           `json:"count"`
+	TotalJoints  int           `json:"total_joints"`
+	AvgDays      float64       `json:"avg_days_in_state,omitempty"`
+}
+
+// InspectionResult represents inspection data
+type InspectionResult struct {
+	ID          int         `json:"id" db:"id"`
+	WorkOrder   string      `json:"work_order" db:"wkorder"`
+	Color       string      `json:"color" db:"color"`
+	CN          ColorNumber `json:"cn" db:"cn"`
+	Joints      int         `json:"joints" db:"joints"`
+	Accept      int         `json:"accept" db:"accept"`
+	Reject      int         `json:"reject" db:"reject"`
+	Pin         int         `json:"pin" db:"pin"`
+	Coupling    int         `json:"cplg" db:"cplg"`
+	PC          int         `json:"pc" db:"pc"`
+	Rack        string      `json:"rack,omitempty" db:"rack"`
+	RepairPin   int         `json:"repair_pin" db:"rep_pin"`
+	RepairCplg  int         `json:"repair_cplg" db:"rep_cplg"`
+	RepairPC    int         `json:"repair_pc" db:"rep_pc"`
+	Complete    bool        `json:"complete" db:"complete"`
+}
+
+// InventoryItem represents pipe inventory
+type InventoryItem struct {
+	ID          int         `json:"id" db:"id"`
+	WorkOrder   string      `json:"work_order,omitempty" db:"wkorder"`
+	RNumber     *int        `json:"r_number,omitempty" db:"rnumber"`
+	CustomerID  int         `json:"customer_id" db:"custid"`
+	Customer    string      `json:"customer" db:"customer"`
+	Joints      int         `json:"joints" db:"joints"`
+	Rack        string      `json:"rack,omitempty" db:"rack"`
+	Size        string      `json:"size" db:"size"`
+	Weight      string      `json:"weight" db:"weight"`
+	Grade       string      `json:"grade" db:"grade"`
+	Connection  string      `json:"connection" db:"connection"`
+	CTD         bool        `json:"ctd" db:"ctd"`
+	WString     bool        `json:"wstring" db:"wstring"`
+	SWGCC       string      `json:"swgcc" db:"swgcc"`
+	Color       string      `json:"color" db:"color"`
+	CN          ColorNumber `json:"cn" db:"cn"`
+	CustomerPO  string      `json:"customer_po,omitempty" db:"customerpo"`
+	DateIn      *time.Time  `json:"date_in,omitempty" db:"datein"`
+	DateOut     *time.Time  `json:"date_out,omitempty" db:"dateout"`
+	Location    string      `json:"location,omitempty" db:"location"`
+}
+
+// Customer represents customer data
+type Customer struct {
+	ID             int    `json:"id" db:"custid"`
+	Name           string `json:"name" db:"customer"`
+	BillingAddress string `json:"billing_address,omitempty" db:"billingaddress"`
+	BillingCity    string `json:"billing_city,omitempty" db:"billingcity"`
+	BillingState   string `json:"billing_state,omitempty" db:"billingstate"`
+	BillingZip     string `json:"billing_zip,omitempty" db:"billingzipcode"`
+	Contact        string `json:"contact,omitempty" db:"contact"`
+	Phone          string `json:"phone,omitempty" db:"phone"`
+	Email          string `json:"email,omitempty" db:"email"`
+	Deleted        bool   `json:"deleted" db:"deleted"`
+}
+
+// PipeSize represents size/weight/connection combinations
+type PipeSize struct {
+	ID         int    `json:"id" db:"sizeid"`
+	CustomerID int    `json:"customer_id" db:"custid"`
+	Size       string `json:"size" db:"size"`
+	Weight     string `json:"weight" db:"weight"`
+	Connection string `json:"connection" db:"connection"`
+}
+
+// DashboardStats represents aggregated dashboard data
+type DashboardStats struct {
+	JobSummaries      []JobSummary           `json:"job_summaries"`
+	RecentActivity    []Job                  `json:"recent_activity"`
+	InventoryByGrade  map[string]int         `json:"inventory_by_grade"`
+	PendingRepairs    int                    `json:"pending_repairs"`
+	TotalCustomers    int                    `json:"total_customers"`
+	TopCustomers      []CustomerStats        `json:"top_customers"`
+}
+
+// CustomerStats for dashboard
+type CustomerStats struct {
+	CustomerID   int    `json:"customer_id"`
+	CustomerName string `json:"customer_name"`
+	ActiveJobs   int    `json:"active_jobs"`
+	TotalJoints  int    `json:"total_joints"`
+}
+
+// Pagination represents pagination metadata
+type Pagination struct {
+	Page       int `json:"page"`
+	PerPage    int `json:"per_page"`
+	Total      int `json:"total"`
+	TotalPages int `json:"total_pages"`
+}
+
+// GetCurrentState determines workflow state based on dates and flags
+func (j *Job) GetCurrentState() WorkflowState {
+	// Completed/Shipped (joints < 0 indicates shipped)
+	if j.DateOut != nil && j.Joints < 0 {
+		return StateCompleted
+	}
+	
+	// Inventory (has inventory date and positive joints)
+	if j.DateIn != nil && j.Joints > 0 {
+		return StateInventory
+	}
+	
+	// Inspection (inspected but not yet in inventory)
+	if j.Inspected != nil && j.Complete {
+		return StateInspection
+	}
+	
+	// Production (in production but not inspected)
+	if j.InProduction != nil {
+		return StateProduction
+	}
+	
+	// Default to receiving
+	return StateReceiving
+}
+
+// IsActive returns true if job is not completed/shipped
+func (j *Job) IsActive() bool {
+	return !j.Deleted && j.GetCurrentState() != StateCompleted
+}
+
+// GetColorName returns the color name for a CN
+func (cn ColorNumber) GetColorName() string {
+	switch cn {
+	case CNPremium:
+		return "WHT"
+	case CNStandard:
+		return "BLU"
+	case CNEconomy:
+		return "GRN"
+	case CNRejected:
+		return "RED"
+	case CNGrade5:
+		return "Grade 5"
+	case CNGrade6:
+		return "Grade 6"
+	default:
+		return "Unknown"
+	}
+}
+
+// GetQualityDescription returns quality description for CN
+func (cn ColorNumber) GetQualityDescription() string {
+	switch cn {
+	case CNPremium:
+		return "Premium Quality"
+	case CNStandard:
+		return "Standard Quality"
+	case CNEconomy:
+		return "Economy Quality"
+	case CNRejected:
+		return "Rejected/Problem"
+	case CNGrade5:
+		return "Grade 5 Quality"
+	case CNGrade6:
+		return "Grade 6 Quality"
+	default:
+		return "Unknown Quality"
+	}
+}

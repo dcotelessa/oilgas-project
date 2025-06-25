@@ -1,4 +1,4 @@
-module oilgas-inventory-backend
+module oilgas-backend
 
 go 1.23
 

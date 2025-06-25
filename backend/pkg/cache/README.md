@@ -1,7 +1,5 @@
 # In-Memory Cache Implementation
 
-Copy the complete cache implementation from the `inmemory_cache` artifact to `cache.go` in this directory.
-
 The cache provides:
 - Thread-safe operations with TTL
 - Automatic cleanup of expired items
