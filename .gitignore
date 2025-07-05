@@ -8,6 +8,7 @@
 .env.prod
 .env.staging
 .env.dev
+.env.local
 
 # Real database files
 *.mdb
@@ -137,10 +138,7 @@ coverage/
 test-results/
 
 # Migration analysis (may contain sensitive schema info)
-migration_output/analysis/queries.json
-migration_output/data/*.csv
-database/data/*.csv
-database/analysis/
+database/*
 
 # ===== BACKUP AND ARCHIVE FILES =====
 *.bak
@@ -153,24 +151,11 @@ database/analysis/
 
 # ===== PROJECT SPECIFIC =====
 # Real ColdFusion source (if sensitive)
-coldfusion_source/
-cf_production/
-real_cf_files/
-
-# Real MDB files and exports
-petros.mdb
-production.mdb
-real_database.*
-
-# Actual company data
-customer_lists/
-real_inventory/
-production_exports/
+coldfusion_files/
 
 # ===== SAFE FILES TO COMMIT =====
 # These files are explicitly safe (override any global ignores)
 !.env.example
-!.env.local
 !seeds/local_seeds.sql
 !README.md
 !docs/**

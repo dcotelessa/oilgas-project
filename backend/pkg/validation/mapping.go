@@ -42,50 +42,90 @@ func FromInventoryModel(item *models.InventoryItem) *InventoryValidation {
 	}
 }
 
-// ToCustomerModel converts CustomerValidation to models.Customer
+// ToCustomerModel converts CustomerValidation to models.Customer (UPDATED for complete model)
 func (cv *CustomerValidation) ToCustomerModel() *models.Customer {
 	now := time.Now()
 	
 	return &models.Customer{
-		Customer:       cv.Name,
+		Customer:       cv.CustomerName, // Fixed: was cv.Name, now cv.CustomerName
 		BillingAddress: cv.Address,
 		BillingCity:    cv.City,
 		BillingState:   cv.State,
-		BillingZipcode: cv.Zipcode,
+		BillingZipcode: cv.Zip,        // Fixed: was cv.Zipcode, now cv.Zip
+		Contact:        cv.Contact,     // Added missing field
 		Phone:          cv.Phone,
+		Fax:            cv.Fax,         // Added missing field
 		Email:          cv.Email,
+		// Color fields
+		Color1:         cv.Color1,
+		Color2:         cv.Color2,
+		Color3:         cv.Color3,
+		Color4:         cv.Color4,
+		Color5:         cv.Color5,
+		// Loss fields
+		Loss1:          cv.Loss1,
+		Loss2:          cv.Loss2,
+		Loss3:          cv.Loss3,
+		Loss4:          cv.Loss4,
+		Loss5:          cv.Loss5,
+		// WS Color fields
+		WSColor1:       cv.WSColor1,
+		WSColor2:       cv.WSColor2,
+		WSColor3:       cv.WSColor3,
+		WSColor4:       cv.WSColor4,
+		WSColor5:       cv.WSColor5,
+		// WS Loss fields
+		WSLoss1:        cv.WSLoss1,
+		WSLoss2:        cv.WSLoss2,
+		WSLoss3:        cv.WSLoss3,
+		WSLoss4:        cv.WSLoss4,
+		WSLoss5:        cv.WSLoss5,
+		// System fields
 		Deleted:        false,
 		CreatedAt:      now,
 	}
 }
 
-// FromCustomerModel converts models.Customer to CustomerValidation
+// FromCustomerModel converts models.Customer to CustomerValidation (UPDATED)
 func FromCustomerModel(customer *models.Customer) *CustomerValidation {
 	return &CustomerValidation{
-		Name:    customer.Customer,
-		Address: customer.BillingAddress,
-		City:    customer.BillingCity,
-		State:   customer.BillingState,
-		Zipcode: customer.BillingZipcode,
-		Phone:   customer.Phone,
-		Email:   customer.Email,
+		CustomerName: customer.Customer,       // Fixed: was Name, now CustomerName
+		Address:      customer.BillingAddress,
+		City:         customer.BillingCity,
+		State:        customer.BillingState,
+		Zip:          customer.BillingZipcode, // Fixed: was Zipcode, now Zip
+		Contact:      customer.Contact,        // Added missing field
+		Phone:        customer.Phone,
+		Fax:          customer.Fax,            // Added missing field
+		Email:        customer.Email,
+		// Color fields
+		Color1:       customer.Color1,
+		Color2:       customer.Color2,
+		Color3:       customer.Color3,
+		Color4:       customer.Color4,
+		Color5:       customer.Color5,
+		// Loss fields
+		Loss1:        customer.Loss1,
+		Loss2:        customer.Loss2,
+		Loss3:        customer.Loss3,
+		Loss4:        customer.Loss4,
+		Loss5:        customer.Loss5,
+		// WS Color fields
+		WSColor1:     customer.WSColor1,
+		WSColor2:     customer.WSColor2,
+		WSColor3:     customer.WSColor3,
+		WSColor4:     customer.WSColor4,
+		WSColor5:     customer.WSColor5,
+		// WS Loss fields
+		WSLoss1:      customer.WSLoss1,
+		WSLoss2:      customer.WSLoss2,
+		WSLoss3:      customer.WSLoss3,
+		WSLoss4:      customer.WSLoss4,
+		WSLoss5:      customer.WSLoss5,
 	}
 }
 
-// UpdateCustomerValidation for additional validation fields not in basic CustomerValidation
-type UpdateCustomerValidation struct {
-	CustomerValidation
-	Contact string `json:"contact,omitempty"`
-	Fax     string `json:"fax,omitempty"`
-}
-
-// ToCustomerModel for UpdateCustomerValidation
-func (ucv *UpdateCustomerValidation) ToCustomerModel() *models.Customer {
-	base := ucv.CustomerValidation.ToCustomerModel()
-	base.Contact = ucv.Contact
-	base.Fax = ucv.Fax
-	return base
-}
+// REMOVED: UpdateCustomerValidation (no longer needed - use main CustomerValidation)
 
 // ExtendedInventoryValidation for additional fields not in basic validation
 type ExtendedInventoryValidation struct {
@@ -207,7 +247,72 @@ func FromExtendedInventoryModel(item *models.InventoryItem) *ExtendedInventoryVa
 	}
 }
 
-// Helper functions for common validation patterns
+// NEW: Customer-specific helper functions
+
+// ValidateCustomerColor validates customer color assignments
+func ValidateCustomerColor(color string) error {
+	if color == "" {
+		return nil // Optional field
+	}
+	
+	if !ValidateColorCode(color) {
+		return ValidationError{
+			Field:   "color",
+			Value:   color,
+			Message: "invalid color code",
+		}
+	}
+	
+	return nil
+}
+
+// ValidateCustomerLoss validates customer loss rates
+func ValidateCustomerLoss(loss string) error {
+	if loss == "" {
+		return nil // Optional field
+	}
+	
+	if !ValidateLossRate(loss) {
+		return ValidationError{
+			Field:   "loss",
+			Value:   loss,
+			Message: "invalid loss rate format",
+		}
+	}
+	
+	return nil
+}
+
+// BatchCustomerValidation for bulk customer operations
+type BatchCustomerValidation struct {
+	Customers []CustomerValidation `json:"customers"`
+}
+
+// Validate validates all customers in batch
+func (bcv *BatchCustomerValidation) Validate() map[int]error {
+	errors := make(map[int]error)
+	
+	for i, customer := range bcv.Customers {
+		if err := customer.Validate(); err != nil {
+			errors[i] = err
+		}
+	}
+	
+	return errors
+}
+
+// ToCustomerModels converts batch to slice of customer models
+func (bcv *BatchCustomerValidation) ToCustomerModels() []*models.Customer {
+	var customers []*models.Customer
+	
+	for _, validation := range bcv.Customers {
+		customers = append(customers, validation.ToCustomerModel())
+	}
+	
+	return customers
+}
+
+// Helper functions for common validation patterns (keeping existing ones)
 
 // ValidateWorkOrder validates work order format
 func ValidateWorkOrder(workOrder string) error {
@@ -283,7 +388,7 @@ func ValidateWellLease(well, lease string) []ValidationError {
 	return errors
 }
 
-// BatchInventoryValidation for bulk operations
+// BatchInventoryValidation for bulk operations (keeping existing)
 type BatchInventoryValidation struct {
 	Items []InventoryValidation `json:"items"`
 }

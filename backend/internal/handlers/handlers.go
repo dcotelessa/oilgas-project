@@ -642,33 +642,227 @@ func isValidGradeFormat(grade string) bool {
 
 // Placeholder handlers for other endpoints (implement as needed)
 func (h *Handlers) GetReceived(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement received items listing",
-		"note":    "Add ReceivedRepository when needed by frontend",
+	// Parse filters
+	filters := map[string]interface{}{}
+	
+	if customerID := c.Query("customer_id"); customerID != "" {
+		if id, err := strconv.Atoi(customerID); err == nil {
+			filters["customer_id"] = id
+		}
+	}
+	
+	if status := c.Query("status"); status != "" {
+		// pending, in_production, completed
+		filters["status"] = status
+	}
+	
+	if dateFrom := c.Query("date_from"); dateFrom != "" {
+		if date, err := time.Parse("2006-01-02", dateFrom); err == nil {
+			filters["date_from"] = date
+		}
+	}
+	
+	if dateTo := c.Query("date_to"); dateTo != "" {
+		if date, err := time.Parse("2006-01-02", dateTo); err == nil {
+			filters["date_to"] = date
+		}
+	}
+
+	// Parse pagination
+	limit := 50
+	if limitParam := c.Query("limit"); limitParam != "" {
+		if l, err := strconv.Atoi(limitParam); err == nil && l > 0 && l <= 500 {
+			limit = l
+		}
+	}
+
+	offset := 0
+	if offsetParam := c.Query("offset"); offsetParam != "" {
+		if o, err := strconv.Atoi(offsetParam); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	// Get received items through service
+	items, total, err := h.services.Received.GetFiltered(c.Request.Context(), filters, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to retrieve received items",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"received_items": items,
+		"total":          total,
+		"limit":          limit,
+		"offset":         offset,
+		"filters":        filters,
 	})
 }
 
 func (h *Handlers) GetReceivedItem(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement received item retrieval",
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid received item ID",
+		})
+		return
+	}
+
+	item, err := h.services.Received.GetByID(c.Request.Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Received item not found",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to retrieve received item",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"item": item,
 	})
 }
 
 func (h *Handlers) CreateReceivedItem(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement received item creation",
+	var req validation.ReceivedValidation
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid JSON",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Validate the received item data
+	if errors := req.Validate(); len(errors) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":             "Validation failed",
+			"validation_errors": errors,
+		})
+		return
+	}
+
+	// Create received item through service
+	item, err := h.services.Received.Create(c.Request.Context(), &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to create received item",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Received item created successfully",
+		"item":    item,
 	})
 }
 
 func (h *Handlers) UpdateReceivedItem(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement received item update",
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid received item ID",
+		})
+		return
+	}
+
+	var req validation.ReceivedValidation
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid JSON",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Validate the received item data
+	if errors := req.Validate(); len(errors) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":             "Validation failed",
+			"validation_errors": errors,
+		})
+		return
+	}
+
+	// Update received item through service
+	item, err := h.services.Received.Update(c.Request.Context(), id, &req)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Received item not found",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to update received item",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Received item updated successfully",
+		"item":    item,
 	})
 }
 
 func (h *Handlers) DeleteReceivedItem(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement received item deletion",
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid received item ID",
+		})
+		return
+	}
+
+	// Check if item can be deleted (business rules)
+	canDelete, reason, err := h.services.Received.CanDelete(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to check deletion status",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	if !canDelete {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":  "Cannot delete received item",
+			"reason": reason,
+		})
+		return
+	}
+
+	// Delete received item through service
+	err = h.services.Received.Delete(c.Request.Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Received item not found",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to delete received item",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Received item deleted successfully",
 	})
 }
 
@@ -926,25 +1120,180 @@ type DateRange struct {
 
 // Analytics handlers
 func (h *Handlers) GetDashboardStats(c *gin.Context) {
-	// For now, delegate to inventory summary
-	summary, err := h.services.Inventory.GetSummary(c.Request.Context())
+	// Get inventory summary (already implemented)
+	inventorySummary, err := h.services.Inventory.GetSummary(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to get dashboard stats",
+			"error":   "Failed to get inventory summary",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Get customer count
+	customerCount, err := h.services.Customer.GetTotalCount(c.Request.Context())
+	if err != nil {
+		// Don't fail the whole request, just log and use 0
+		customerCount = 0
+	}
+
+	// Get recent activity (last 7 days)
+	recentActivity, err := h.services.Inventory.GetRecentActivity(c.Request.Context(), 7)
+	if err != nil {
+		recentActivity = []interface{}{} // Empty array if fails
+	}
+
+	// Build comprehensive dashboard
+	dashboard := gin.H{
+		"inventory": inventorySummary,
+		"customers": gin.H{
+			"total": customerCount,
+		},
+		"recent_activity": recentActivity,
+		"system": gin.H{
+			"cache_stats": h.services.Cache.GetStats(),
+			"uptime":      time.Since(startTime).String(), // You'll need to track this
+		},
+		"summary": gin.H{
+			"total_items":   inventorySummary.TotalItems,
+			"total_customers": customerCount,
+			"active_grades": len(inventorySummary.GradeDistribution),
+		},
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"dashboard": dashboard,
+		"generated_at": time.Now().UTC(),
+	})
+}
+
+func (h *Handlers) GetCustomerActivity(c *gin.Context) {
+	// Parse date range
+	days := 30 // default
+	if daysParam := c.Query("days"); daysParam != "" {
+		if d, err := strconv.Atoi(daysParam); err == nil && d > 0 && d <= 365 {
+			days = d
+		}
+	}
+
+	// Parse customer ID filter (optional)
+	var customerID *int
+	if custParam := c.Query("customer_id"); custParam != "" {
+		if id, err := strconv.Atoi(custParam); err == nil {
+			customerID = &id
+		}
+	}
+
+	// Get customer activity through service
+	activity, err := h.services.Customer.GetActivity(c.Request.Context(), days, customerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to get customer activity",
 			"details": err.Error(),
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"dashboard": summary,
+		"activity":   activity,
+		"period_days": days,
+		"customer_id": customerID,
+		"generated_at": time.Now().UTC(),
 	})
 }
 
-func (h *Handlers) GetCustomerActivity(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message": "TODO: Implement customer activity",
-		"note":    "Add analytics queries when needed",
+func (h *Handlers) GetTopCustomers(c *gin.Context) {
+	// Parse limit
+	limit := 10
+	if limitParam := c.Query("limit"); limitParam != "" {
+		if l, err := strconv.Atoi(limitParam); err == nil && l > 0 && l <= 50 {
+			limit = l
+		}
+	}
+
+	// Parse time period
+	days := 30
+	if daysParam := c.Query("days"); daysParam != "" {
+		if d, err := strconv.Atoi(daysParam); err == nil && d > 0 && d <= 365 {
+			days = d
+		}
+	}
+
+	// Get top customers by activity
+	topCustomers, err := h.services.Customer.GetTopByActivity(c.Request.Context(), limit, days)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to get top customers",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"top_customers": topCustomers,
+		"limit":         limit,
+		"period_days":   days,
+	})
+}
+
+func (h *Handlers) GetGradeAnalytics(c *gin.Context) {
+	// Get grade distribution and trends
+	analytics, err := h.services.Inventory.GetGradeAnalytics(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to get grade analytics",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"grade_analytics": analytics,
+		"generated_at":    time.Now().UTC(),
+	})
+}
+
+func (h *Handlers) UpdateReceivedStatus(c *gin.Context) {
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid received item ID",
+		})
+		return
+	}
+
+	var req struct {
+		Status string `json:"status" binding:"required,oneof=pending in_production threading completed"`
+		Notes  string `json:"notes"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Update status through service
+	err = h.services.Received.UpdateStatus(c.Request.Context(), id, req.Status, req.Notes)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Received item not found",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to update status",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Status updated successfully",
 	})
 }
 

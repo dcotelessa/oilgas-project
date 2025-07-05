@@ -41,6 +41,13 @@ This repository contains **ONLY** mock/fake data for development purposes. All s
 - Docker & Docker Compose
 - PostgreSQL 15 (or use Docker)
 
+### Data Setup
+
+1. go to folder `db_prep`
+2. run `./analyze_cf.sh`. It will request loading certain dependencies.
+3. If all dependencies are loaded, run `./analyze_cf.sh` again. 
+4. Migrate outputs using `./organize_project.sh`
+
 ### Development Setup
 
 1. **Start the database:**

@@ -26,10 +26,18 @@ func New(db *pgxpool.Pool) *Repositories {
 	}
 }
 
-// Customer repository - minimal implementation
+// Customer repository
 type CustomerRepository interface {
+	// Basic CRUD operations
 	GetAll(ctx context.Context) ([]models.Customer, error)
 	GetByID(ctx context.Context, id int) (*models.Customer, error)
+	Create(ctx context.Context, req *validation.CustomerValidation) (*models.Customer, error)
+	Update(ctx context.Context, id int, req *validation.CustomerValidation) (*models.Customer, error)
+	Delete(ctx context.Context, id int) error
+	
+	// Validation and checks
+	ExistsByName(ctx context.Context, name string, excludeID ...int) (bool, error)
+	HasActiveInventory(ctx context.Context, customerID int) (bool, error)
 }
 
 type customerRepository struct {
@@ -43,12 +51,16 @@ func NewCustomerRepository(db *pgxpool.Pool) CustomerRepository {
 func (r *customerRepository) GetAll(ctx context.Context) ([]models.Customer, error) {
 	query := `
 		SELECT customer_id, customer, billing_address, billing_city, billing_state, 
-		       billing_zipcode, contact, phone, fax, email, deleted, created_at
+		       billing_zipcode, contact, phone, fax, email, 
+		       color1, color2, color3, color4, color5,
+		       loss1, loss2, loss3, loss4, loss5,
+		       wscolor1, wscolor2, wscolor3, wscolor4, wscolor5,
+		       wsloss1, wsloss2, wsloss3, wsloss4, wsloss5,
+		       deleted, created_at
 		FROM store.customers 
 		WHERE deleted = false 
 		ORDER BY customer
 	`
-
 	rows, err := r.db.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query customers: %w", err)
@@ -61,7 +73,12 @@ func (r *customerRepository) GetAll(ctx context.Context) ([]models.Customer, err
 		err := rows.Scan(
 			&c.CustomerID, &c.Customer, &c.BillingAddress, &c.BillingCity, 
 			&c.BillingState, &c.BillingZipcode, &c.Contact, &c.Phone, 
-			&c.Fax, &c.Email, &c.Deleted, &c.CreatedAt,
+			&c.Fax, &c.Email,
+			&c.Color1, &c.Color2, &c.Color3, &c.Color4, &c.Color5,
+			&c.Loss1, &c.Loss2, &c.Loss3, &c.Loss4, &c.Loss5,
+			&c.WSColor1, &c.WSColor2, &c.WSColor3, &c.WSColor4, &c.WSColor5,
+			&c.WSLoss1, &c.WSLoss2, &c.WSLoss3, &c.WSLoss4, &c.WSLoss5,
+			&c.Deleted, &c.CreatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan customer: %w", err)
@@ -79,26 +96,188 @@ func (r *customerRepository) GetAll(ctx context.Context) ([]models.Customer, err
 func (r *customerRepository) GetByID(ctx context.Context, id int) (*models.Customer, error) {
 	query := `
 		SELECT customer_id, customer, billing_address, billing_city, billing_state, 
-		       billing_zipcode, contact, phone, fax, email, deleted, created_at
+		       billing_zipcode, contact, phone, fax, email,
+		       color1, color2, color3, color4, color5,
+		       loss1, loss2, loss3, loss4, loss5,
+		       wscolor1, wscolor2, wscolor3, wscolor4, wscolor5,
+		       wsloss1, wsloss2, wsloss3, wsloss4, wsloss5,
+		       deleted, created_at
 		FROM store.customers 
 		WHERE customer_id = $1 AND deleted = false
 	`
-
+	
 	var c models.Customer
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&c.CustomerID, &c.Customer, &c.BillingAddress, &c.BillingCity, 
 		&c.BillingState, &c.BillingZipcode, &c.Contact, &c.Phone, 
-		&c.Fax, &c.Email, &c.Deleted, &c.CreatedAt,
+		&c.Fax, &c.Email,
+		&c.Color1, &c.Color2, &c.Color3, &c.Color4, &c.Color5,
+		&c.Loss1, &c.Loss2, &c.Loss3, &c.Loss4, &c.Loss5,
+		&c.WSColor1, &c.WSColor2, &c.WSColor3, &c.WSColor4, &c.WSColor5,
+		&c.WSLoss1, &c.WSLoss2, &c.WSLoss3, &c.WSLoss4, &c.WSLoss5,
+		&c.Deleted, &c.CreatedAt,
 	)
-
+	
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("customer not found")
 		}
 		return nil, fmt.Errorf("failed to get customer: %w", err)
 	}
-
+	
 	return &c, nil
+}
+
+func (r *customerRepository) Create(ctx context.Context, req *validation.CustomerValidation) (*models.Customer, error) {
+	query := `
+		INSERT INTO store.customers (
+			customer, billing_address, billing_city, billing_state, 
+			billing_zipcode, contact, phone, fax, email,
+			color1, color2, color3, color4, color5,
+			loss1, loss2, loss3, loss4, loss5,
+			wscolor1, wscolor2, wscolor3, wscolor4, wscolor5,
+			wsloss1, wsloss2, wsloss3, wsloss4, wsloss5,
+			deleted, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 
+		          $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+		          $20, $21, $22, $23, $24, $25, $26, $27, $28, $29,
+		          false, NOW())
+		RETURNING customer_id, customer, billing_address, billing_city, billing_state, 
+		          billing_zipcode, contact, phone, fax, email,
+		          color1, color2, color3, color4, color5,
+		          loss1, loss2, loss3, loss4, loss5,
+		          wscolor1, wscolor2, wscolor3, wscolor4, wscolor5,
+		          wsloss1, wsloss2, wsloss3, wsloss4, wsloss5,
+		          deleted, created_at
+	`
+	
+	var c models.Customer
+	err := r.db.QueryRow(ctx, query,
+		req.CustomerName, req.Address, req.City, req.State, req.Zip,
+		req.Contact, req.Phone, req.Fax, req.Email,
+		req.Color1, req.Color2, req.Color3, req.Color4, req.Color5,
+		req.Loss1, req.Loss2, req.Loss3, req.Loss4, req.Loss5,
+		req.WSColor1, req.WSColor2, req.WSColor3, req.WSColor4, req.WSColor5,
+		req.WSLoss1, req.WSLoss2, req.WSLoss3, req.WSLoss4, req.WSLoss5,
+	).Scan(
+		&c.CustomerID, &c.Customer, &c.BillingAddress, &c.BillingCity, 
+		&c.BillingState, &c.BillingZipcode, &c.Contact, &c.Phone, 
+		&c.Fax, &c.Email,
+		&c.Color1, &c.Color2, &c.Color3, &c.Color4, &c.Color5,
+		&c.Loss1, &c.Loss2, &c.Loss3, &c.Loss4, &c.Loss5,
+		&c.WSColor1, &c.WSColor2, &c.WSColor3, &c.WSColor4, &c.WSColor5,
+		&c.WSLoss1, &c.WSLoss2, &c.WSLoss3, &c.WSLoss4, &c.WSLoss5,
+		&c.Deleted, &c.CreatedAt,
+	)
+	
+	if err != nil {
+		return nil, fmt.Errorf("failed to create customer: %w", err)
+	}
+	
+	return &c, nil
+}
+
+func (r *customerRepository) Update(ctx context.Context, id int, req *validation.CustomerValidation) (*models.Customer, error) {
+	query := `
+		UPDATE store.customers 
+		SET customer = $2, billing_address = $3, billing_city = $4, billing_state = $5,
+		    billing_zipcode = $6, contact = $7, phone = $8, fax = $9, email = $10,
+		    color1 = $11, color2 = $12, color3 = $13, color4 = $14, color5 = $15,
+		    loss1 = $16, loss2 = $17, loss3 = $18, loss4 = $19, loss5 = $20,
+		    wscolor1 = $21, wscolor2 = $22, wscolor3 = $23, wscolor4 = $24, wscolor5 = $25,
+		    wsloss1 = $26, wsloss2 = $27, wsloss3 = $28, wsloss4 = $29, wsloss5 = $30
+		WHERE customer_id = $1 AND deleted = false
+		RETURNING customer_id, customer, billing_address, billing_city, billing_state, 
+		          billing_zipcode, contact, phone, fax, email,
+		          color1, color2, color3, color4, color5,
+		          loss1, loss2, loss3, loss4, loss5,
+		          wscolor1, wscolor2, wscolor3, wscolor4, wscolor5,
+		          wsloss1, wsloss2, wsloss3, wsloss4, wsloss5,
+		          deleted, created_at
+	`
+	
+	var c models.Customer
+	err := r.db.QueryRow(ctx, query, id,
+		req.CustomerName, req.Address, req.City, req.State, req.Zip,
+		req.Contact, req.Phone, req.Fax, req.Email,
+		req.Color1, req.Color2, req.Color3, req.Color4, req.Color5,
+		req.Loss1, req.Loss2, req.Loss3, req.Loss4, req.Loss5,
+		req.WSColor1, req.WSColor2, req.WSColor3, req.WSColor4, req.WSColor5,
+		req.WSLoss1, req.WSLoss2, req.WSLoss3, req.WSLoss4, req.WSLoss5,
+	).Scan(
+		&c.CustomerID, &c.Customer, &c.BillingAddress, &c.BillingCity, 
+		&c.BillingState, &c.BillingZipcode, &c.Contact, &c.Phone, 
+		&c.Fax, &c.Email,
+		&c.Color1, &c.Color2, &c.Color3, &c.Color4, &c.Color5,
+		&c.Loss1, &c.Loss2, &c.Loss3, &c.Loss4, &c.Loss5,
+		&c.WSColor1, &c.WSColor2, &c.WSColor3, &c.WSColor4, &c.WSColor5,
+		&c.WSLoss1, &c.WSLoss2, &c.WSLoss3, &c.WSLoss4, &c.WSLoss5,
+		&c.Deleted, &c.CreatedAt,
+	)
+	
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("customer not found")
+		}
+		return nil, fmt.Errorf("failed to update customer: %w", err)
+	}
+	
+	return &c, nil
+}
+
+func (r *customerRepository) Delete(ctx context.Context, id int) error {
+	query := `
+		UPDATE store.customers 
+		SET deleted = true 
+		WHERE customer_id = $1 AND deleted = false
+	`
+	
+	result, err := r.db.Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete customer: %w", err)
+	}
+	
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("customer not found or already deleted")
+	}
+	
+	return nil
+}
+
+func (r *customerRepository) ExistsByName(ctx context.Context, name string, excludeID ...int) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM store.customers WHERE LOWER(customer) = LOWER($1) AND deleted = false`
+	args := []interface{}{name}
+	
+	if len(excludeID) > 0 && excludeID[0] != 0 {
+		query += " AND customer_id != $2"
+		args = append(args, excludeID[0])
+	}
+	query += ")"
+	
+	var exists bool
+	err := r.db.QueryRow(ctx, query, args...).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check if customer exists: %w", err)
+	}
+	
+	return exists, nil
+}
+
+func (r *customerRepository) HasActiveInventory(ctx context.Context, customerID int) (bool, error) {
+	query := `
+		SELECT EXISTS(
+			SELECT 1 FROM store.inventory 
+			WHERE custid = $1 AND deleted = false
+		)
+	`
+	
+	var hasInventory bool
+	err := r.db.QueryRow(ctx, query, customerID).Scan(&hasInventory)
+	if err != nil {
+		return false, fmt.Errorf("failed to check customer inventory: %w", err)
+	}
+	
+	return hasInventory, nil
 }
 
 // Inventory repository - core methods only
