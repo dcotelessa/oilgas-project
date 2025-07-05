@@ -158,9 +158,9 @@ func (s *customerService) Update(ctx context.Context, idStr string, req *validat
 	s.invalidateCustomerCaches()
 
 	// If customer name changed, invalidate name-based caches
-	if existing.Customer != customer.Customer {
-		s.cache.Delete(fmt.Sprintf("customer:name:%s", strings.ToLower(existing.Customer)))
-		s.cache.Delete(fmt.Sprintf("customer:name:%s", strings.ToLower(customer.Customer)))
+	if existing.CustomerName != customer.CustomerName {
+		s.cache.Delete(fmt.Sprintf("customer:name:%s", strings.ToLower(existing.CustomerName)))
+		s.cache.Delete(fmt.Sprintf("customer:name:%s", strings.ToLower(customer.CustomerName)))
 	}
 
 	return customer, nil
@@ -197,7 +197,7 @@ func (s *customerService) Delete(ctx context.Context, idStr string) error {
 	// Remove from cache
 	cacheKey := fmt.Sprintf("customer:%d", id)
 	s.cache.Delete(cacheKey)
-	s.cache.Delete(fmt.Sprintf("customer:name:%s", strings.ToLower(existing.Customer)))
+	s.cache.Delete(fmt.Sprintf("customer:name:%s", strings.ToLower(existing.CustomerName)))
 	
 	// Invalidate relevant caches
 	s.invalidateCustomerCaches()

@@ -8,7 +8,7 @@ import (
 // Customer represents a customer in the oil & gas inventory system
 type Customer struct {
 	CustomerID      int       `json:"customer_id" db:"customer_id"`
-	Customer        string    `json:"customer" db:"customer"`
+	CustomerName    string    `json:"customer_name" db:"customer"`
 	BillingAddress  string    `json:"billing_address" db:"billing_address"`
 	BillingCity     string    `json:"billing_city" db:"billing_city"`
 	BillingState    string    `json:"billing_state" db:"billing_state"`

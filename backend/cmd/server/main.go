@@ -19,10 +19,14 @@ import (
 )
 
 func main() {
-	// Load environment variables from project root or local
-	if err := godotenv.Load("../../.env"); err != nil {
-		if err := godotenv.Load(".env"); err != nil {
-			log.Println("No .env file found")
+	// Load environment variables - try root .env.local first
+	if err := godotenv.Load("../.env.local"); err != nil {
+		if err := godotenv.Load("../.env"); err != nil {
+			if err := godotenv.Load(".env.local"); err != nil {
+				if err := godotenv.Load(".env"); err != nil {
+					log.Println("No .env file found")
+				}
+			}
 		}
 	}
 
@@ -56,19 +60,19 @@ func main() {
 	}
 	cacheService := cache.New(cacheConfig)
 
-	// Initialize repositories using your existing structure
+	// Initialize repositories
 	repos := repository.New(db)
 
-	// Initialize services
-	workflowService := services.NewWorkflowService(repos, cacheService)
+	// Initialize services using your existing structure
+	servicesContainer := services.New(repos, cacheService)
 
-	// Initialize handlers
-	inventoryHandler := handlers.NewInventoryHandler(workflowService)
+	// Initialize handlers using your existing structure
+	handlersContainer := handlers.New(servicesContainer)
 
 	// Initialize Gin router
 	r := gin.Default()
 
-	// Configure trusted proxies (fix the warning)
+	// Configure trusted proxies
 	r.SetTrustedProxies([]string{"127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"})
 
 	// CORS middleware
@@ -87,22 +91,61 @@ func main() {
 	// API routes
 	api := r.Group("/api/v1")
 	{
-		// Dashboard and workflow endpoints
-		api.GET("/dashboard", inventoryHandler.GetDashboard)
-		api.GET("/customers/:customerID/workflow", inventoryHandler.GetCustomerWorkflow)
-		api.GET("/search", inventoryHandler.SearchInventory)
+		// Dashboard routes
+		api.GET("/dashboard", handlersContainer.GetDashboard)
 
-		// Legacy endpoints for compatibility
-		api.GET("/grades", getGrades)
-		api.GET("/customers", getCustomers)
-		api.GET("/inventory", getInventory)
+		// Customer routes
+		customers := api.Group("/customers")
+		{
+			customers.GET("", handlersContainer.GetCustomers)
+			customers.GET("/:customerID", handlersContainer.GetCustomer)
+			customers.POST("", handlersContainer.CreateCustomer)
+			customers.PUT("/:customerID", handlersContainer.UpdateCustomer)
+			customers.DELETE("/:customerID", handlersContainer.DeleteCustomer)
+			// Customer workflow as a sub-route
+			customers.GET("/:customerID/workflow", handlersContainer.GetCustomerWorkflow)
+		}
+
+		// Inventory routes
+		inventory := api.Group("/inventory")
+		{
+			inventory.GET("", handlersContainer.GetInventory)
+			inventory.GET("/:id", handlersContainer.GetInventoryItem)
+			inventory.POST("", handlersContainer.CreateInventoryItem)
+			inventory.PUT("/:id", handlersContainer.UpdateInventoryItem)
+			inventory.DELETE("/:id", handlersContainer.DeleteInventoryItem)
+			inventory.GET("/summary", handlersContainer.GetInventorySummary)
+		}
+
+		// Search routes
+		search := api.Group("/search")
+		{
+			search.GET("/inventory", handlersContainer.SearchInventory)
+		}
+
+		// Analytics routes
+		analytics := api.Group("/analytics")
+		{
+			analytics.GET("/customers/activity", handlersContainer.GetCustomerActivity)
+			analytics.GET("/customers/top", handlersContainer.GetTopCustomers)
+			analytics.GET("/grades", handlersContainer.GetGradeAnalytics)
+		}
+
+		// Reference data
+		api.GET("/grades", handlersContainer.GetGrades)
+
+		// System routes
+		system := api.Group("/system")
+		{
+			system.GET("/cache/stats", handlersContainer.GetCacheStats)
+			system.POST("/cache/clear", handlersContainer.ClearCache)
+		}
 	}
 
 	log.Printf("🚀 Server starting on port %s", port)
 	log.Printf("🌍 Environment: %s", os.Getenv("APP_ENV"))
 	log.Printf("🔗 Health check: http://localhost:%s/health", port)
-	log.Printf("📊 Dashboard: http://localhost:%s/api/v1/dashboard", port)
-	log.Printf("🔍 Search: http://localhost:%s/api/v1/search?q=<query>", port)
+	log.Printf("📊 API Base: http://localhost:%s/api/v1", port)
 	log.Fatal(r.Run(":" + port))
 }
 
@@ -110,7 +153,6 @@ func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 		
-		// In development, allow localhost origins
 		allowedOrigins := []string{
 			"http://localhost:3000",
 			"http://localhost:5173", // Vite dev server
@@ -118,7 +160,6 @@ func corsMiddleware() gin.HandlerFunc {
 			"http://127.0.0.1:5173",
 		}
 		
-		// Check if origin is allowed
 		allowed := false
 		for _, allowedOrigin := range allowedOrigins {
 			if origin == allowedOrigin {
@@ -144,7 +185,6 @@ func corsMiddleware() gin.HandlerFunc {
 	}
 }
 
-// Utility functions for environment parsing
 func parseEnvDuration(key, defaultValue string) time.Duration {
 	if value := os.Getenv(key); value != "" {
 		if duration, err := time.ParseDuration(value); err == nil {
@@ -162,18 +202,4 @@ func parseEnvInt(key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
-}
-
-// Legacy placeholder handlers for backward compatibility
-func getGrades(c *gin.Context) {
-	grades := []string{"J55", "JZ55", "L80", "N80", "P105", "P110"}
-	utils.SuccessResponse(c, http.StatusOK, gin.H{"grades": grades})
-}
-
-func getCustomers(c *gin.Context) {
-	utils.SuccessResponse(c, http.StatusOK, gin.H{"customers": []interface{}{}})
-}
-
-func getInventory(c *gin.Context) {
-	utils.SuccessResponse(c, http.StatusOK, gin.H{"inventory": []interface{}{}})
 }

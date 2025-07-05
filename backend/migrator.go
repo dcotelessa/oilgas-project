@@ -1,3 +1,4 @@
+// backend/migrator.go
 package main
 
 import (
@@ -45,11 +46,20 @@ func main() {
 		env = os.Args[2]
 	}
 
-	// Load environment variables
-	envFile := fmt.Sprintf(".env.%s", env)
+	// Load environment variables from root directory
+	envFile := fmt.Sprintf("../.env.%s", env)
 	if err := godotenv.Load(envFile); err != nil {
-		log.Printf("Warning: Could not load %s, trying .env", envFile)
-		godotenv.Load(".env")
+		log.Printf("Warning: Could not load %s", envFile)
+		// Try root .env as fallback
+		if err := godotenv.Load("../.env"); err != nil {
+			log.Printf("Warning: Could not load ../.env either")
+			// Try local files as last resort
+			localEnvFile := fmt.Sprintf(".env.%s", env)
+			if err := godotenv.Load(localEnvFile); err != nil {
+				log.Printf("Warning: Could not load %s, trying .env", localEnvFile)
+				godotenv.Load(".env")
+			}
+		}
 	}
 
 	migrator, err := NewMigrator(env)
@@ -76,6 +86,7 @@ func main() {
 	}
 }
 
+// Rest of the migrator code stays the same...
 func NewMigrator(env string) (*Migrator, error) {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {

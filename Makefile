@@ -25,12 +25,10 @@ setup: ## Complete development setup
 
 migrate: ## Run database migrations
 	@echo "🔄 Running migrations for $(ENV) environment..."
-	@if [ ! -f backend/.env.$(ENV) ]; then cp .env.$(ENV) backend/.env.$(ENV) 2>/dev/null || cp .env.local backend/.env.$(ENV); fi
 	cd backend && ./migrator migrate $(ENV)
 
 seed: ## Seed database with data
 	@echo "🌱 Seeding database for $(ENV) environment..."
-	@if [ ! -f backend/.env.$(ENV) ]; then cp .env.$(ENV) backend/.env.$(ENV) 2>/dev/null || cp .env.local backend/.env.$(ENV); fi
 	cd backend && ./migrator seed $(ENV)
 
 status: ## Show migration status

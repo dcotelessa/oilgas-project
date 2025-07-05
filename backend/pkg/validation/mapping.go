@@ -47,7 +47,7 @@ func (cv *CustomerValidation) ToCustomerModel() *models.Customer {
 	now := time.Now()
 	
 	return &models.Customer{
-		Customer:       cv.CustomerName, // Fixed: was cv.Name, now cv.CustomerName
+		CustomerName:   cv.CustomerName,
 		BillingAddress: cv.Address,
 		BillingCity:    cv.City,
 		BillingState:   cv.State,
@@ -89,7 +89,7 @@ func (cv *CustomerValidation) ToCustomerModel() *models.Customer {
 // FromCustomerModel converts models.Customer to CustomerValidation (UPDATED)
 func FromCustomerModel(customer *models.Customer) *CustomerValidation {
 	return &CustomerValidation{
-		CustomerName: customer.Customer,       // Fixed: was Name, now CustomerName
+		CustomerName: customer.CustomerName,
 		Address:      customer.BillingAddress,
 		City:         customer.BillingCity,
 		State:        customer.BillingState,
