@@ -1,3 +1,4 @@
+// backend/internal/repository/interfaces.go
 package repository
 
 import (
@@ -5,89 +6,95 @@ import (
 	"oilgas-backend/internal/models"
 )
 
-// WorkflowRepository defines the interface for workflow data operations
-type WorkflowRepository interface {
-	// Dashboard operations
-	GetDashboardStats(ctx context.Context) (*models.DashboardStats, error)
-	GetJobSummaries(ctx context.Context) ([]models.JobSummary, error)
-	GetRecentActivity(ctx context.Context, limit int) ([]models.Job, error)
+// CustomerRepository handles customer data operations
+type CustomerRepository interface {
+	GetAll(ctx context.Context) ([]models.Customer, error)
+	GetByID(ctx context.Context, id int) (*models.Customer, error)
+	Create(ctx context.Context, customer *models.Customer) error
+	Update(ctx context.Context, customer *models.Customer) error
+	Delete(ctx context.Context, id int) error
 	
-	// Job operations
-	GetJobs(ctx context.Context, filters JobFilters) ([]models.Job, *models.Pagination, error)
-	GetJobByID(ctx context.Context, id int) (*models.Job, error)
-	GetJobByWorkOrder(ctx context.Context, workOrder string) (*models.Job, error)
-	CreateJob(ctx context.Context, job *models.Job) error
-	UpdateJob(ctx context.Context, job *models.Job) error
-	UpdateJobState(ctx context.Context, workOrder string, state models.WorkflowState) error
-	DeleteJob(ctx context.Context, id int) error
-	
-	// Inspection operations
-	GetInspectionResults(ctx context.Context, workOrder string) ([]models.InspectionResult, error)
-	CreateInspectionResult(ctx context.Context, result *models.InspectionResult) error
-	UpdateInspectionResult(ctx context.Context, result *models.InspectionResult) error
-	
-	// Inventory operations
-	GetInventory(ctx context.Context, filters InventoryFilters) ([]models.InventoryItem, *models.Pagination, error)
-	GetInventoryByCustomer(ctx context.Context, customerID int) ([]models.InventoryItem, error)
-	CreateInventoryItem(ctx context.Context, item *models.InventoryItem) error
-	UpdateInventoryItem(ctx context.Context, item *models.InventoryItem) error
-	ShipInventory(ctx context.Context, items []int, shipmentDetails map[string]interface{}) error
-	
-	// Customer operations
-	GetCustomers(ctx context.Context, includeDeleted bool) ([]models.Customer, error)
-	GetCustomerByID(ctx context.Context, id int) (*models.Customer, error)
-	CreateCustomer(ctx context.Context, customer *models.Customer) error
-	UpdateCustomer(ctx context.Context, customer *models.Customer) error
-	DeleteCustomer(ctx context.Context, id int) error
-	
-	// Pipe size operations
-	GetPipeSizes(ctx context.Context, customerID int) ([]models.PipeSize, error)
-	CreatePipeSize(ctx context.Context, size *models.PipeSize) error
-	UpdatePipeSize(ctx context.Context, size *models.PipeSize) error
-	DeletePipeSize(ctx context.Context, id int) error
-	
-	// Grades
-	GetGrades(ctx context.Context) ([]string, error)
+	// Business logic queries
+	ExistsByName(ctx context.Context, name string, excludeID ...int) (bool, error)
+	HasActiveInventory(ctx context.Context, customerID int) (bool, error)
+	GetTotalCount(ctx context.Context) (int, error)
+	Search(ctx context.Context, query string, limit, offset int) ([]models.Customer, int, error)
 }
 
-// JobFilters represents filters for job queries
-type JobFilters struct {
-	CustomerID   *int                  `json:"customer_id,omitempty"`
-	State        *models.WorkflowState `json:"state,omitempty"`
-	WorkOrder    string                `json:"work_order,omitempty"`
-	Grade        string                `json:"grade,omitempty"`
-	Size         string                `json:"size,omitempty"`
-	DateFrom     string                `json:"date_from,omitempty"`
-	DateTo       string                `json:"date_to,omitempty"`
-	IncludeDeleted bool                `json:"include_deleted"`
+// InventoryRepository handles inventory data operations
+type InventoryRepository interface {
+	GetByID(ctx context.Context, id int) (*models.InventoryItem, error)
+	GetByWorkOrder(ctx context.Context, workOrder string) ([]models.InventoryItem, error)
+	Create(ctx context.Context, item *models.InventoryItem) error
+	Update(ctx context.Context, item *models.InventoryItem) error
+	Delete(ctx context.Context, id int) error
 	
-	// Pagination
-	Page     int `json:"page"`
-	PerPage  int `json:"per_page"`
-	OrderBy  string `json:"order_by"`
-	OrderDir string `json:"order_dir"`
+	// Filtering and search
+	GetFiltered(ctx context.Context, filters InventoryFilters) ([]models.InventoryItem, *models.Pagination, error)
+	Search(ctx context.Context, query string, limit, offset int) ([]models.InventoryItem, int, error)
+	
+	// Analytics
+	GetSummary(ctx context.Context) (*models.InventorySummary, error)
+	GetByCustomer(ctx context.Context, customerID int) ([]models.InventoryItem, error)
+	GetRecentActivity(ctx context.Context, days int) ([]models.InventoryItem, error)
 }
 
-// InventoryFilters represents filters for inventory queries
+// GradeRepository handles grade reference data
+type GradeRepository interface {
+	GetAll(ctx context.Context) ([]models.Grade, error)
+	Create(ctx context.Context, grade *models.Grade) error
+	Delete(ctx context.Context, gradeName string) error
+	IsInUse(ctx context.Context, gradeName string) (bool, error)
+	GetUsageStats(ctx context.Context, gradeName string) (*models.GradeUsage, error)
+}
+
+// ReceivedRepository handles received items (incoming pipe tracking)
+type ReceivedRepository interface {
+	GetByID(ctx context.Context, id int) (*models.ReceivedItem, error)
+	Create(ctx context.Context, item *models.ReceivedItem) error
+	Update(ctx context.Context, item *models.ReceivedItem) error
+	Delete(ctx context.Context, id int) error
+	
+	GetFiltered(ctx context.Context, filters ReceivedFilters) ([]models.ReceivedItem, *models.Pagination, error)
+	UpdateStatus(ctx context.Context, id int, status string, notes string) error
+	CanDelete(ctx context.Context, id int) (bool, string, error)
+}
+
+// Filter structs
 type InventoryFilters struct {
 	CustomerID     *int   `json:"customer_id,omitempty"`
 	Grade          string `json:"grade,omitempty"`
 	Size           string `json:"size,omitempty"`
 	Color          string `json:"color,omitempty"`
-	CN             *models.ColorNumber `json:"cn,omitempty"`
+	Location       string `json:"location,omitempty"`
+	Rack           string `json:"rack,omitempty"`
 	MinJoints      *int   `json:"min_joints,omitempty"`
 	MaxJoints      *int   `json:"max_joints,omitempty"`
-	Rack           string `json:"rack,omitempty"`
-	IncludeShipped bool   `json:"include_shipped"`
+	DateFrom       string `json:"date_from,omitempty"`
+	DateTo         string `json:"date_to,omitempty"`
+	IncludeDeleted bool   `json:"include_deleted"`
 	
 	// Pagination
-	Page     int `json:"page"`
-	PerPage  int `json:"per_page"`
+	Page     int    `json:"page"`
+	PerPage  int    `json:"per_page"`
 	OrderBy  string `json:"order_by"`
 	OrderDir string `json:"order_dir"`
 }
 
-// Default values for pagination
+type ReceivedFilters struct {
+	CustomerID *int   `json:"customer_id,omitempty"`
+	Status     string `json:"status,omitempty"`
+	DateFrom   string `json:"date_from,omitempty"`
+	DateTo     string `json:"date_to,omitempty"`
+	
+	// Pagination  
+	Page     int    `json:"page"`
+	PerPage  int    `json:"per_page"`
+	OrderBy  string `json:"order_by"`
+	OrderDir string `json:"order_dir"`
+}
+
+// Pagination defaults
 const (
 	DefaultPage     = 1
 	DefaultPerPage  = 50
@@ -96,26 +103,7 @@ const (
 	DefaultOrderDir = "DESC"
 )
 
-// NormalizePagination sets defaults and validates pagination parameters
-func (f *JobFilters) NormalizePagination() {
-	if f.Page < 1 {
-		f.Page = DefaultPage
-	}
-	if f.PerPage < 1 {
-		f.PerPage = DefaultPerPage
-	}
-	if f.PerPage > MaxPerPage {
-		f.PerPage = MaxPerPage
-	}
-	if f.OrderBy == "" {
-		f.OrderBy = DefaultOrderBy
-	}
-	if f.OrderDir != "ASC" && f.OrderDir != "DESC" {
-		f.OrderDir = DefaultOrderDir
-	}
-}
-
-// NormalizePagination sets defaults and validates pagination parameters
+// NormalizePagination sets defaults for inventory filters
 func (f *InventoryFilters) NormalizePagination() {
 	if f.Page < 1 {
 		f.Page = DefaultPage
@@ -127,7 +115,26 @@ func (f *InventoryFilters) NormalizePagination() {
 		f.PerPage = MaxPerPage
 	}
 	if f.OrderBy == "" {
-		f.OrderBy = "datein"
+		f.OrderBy = "date_in"
+	}
+	if f.OrderDir != "ASC" && f.OrderDir != "DESC" {
+		f.OrderDir = DefaultOrderDir
+	}
+}
+
+// NormalizePagination sets defaults for received filters
+func (f *ReceivedFilters) NormalizePagination() {
+	if f.Page < 1 {
+		f.Page = DefaultPage
+	}
+	if f.PerPage < 1 {
+		f.PerPage = DefaultPerPage
+	}
+	if f.PerPage > MaxPerPage {
+		f.PerPage = MaxPerPage
+	}
+	if f.OrderBy == "" {
+		f.OrderBy = "date_received"
 	}
 	if f.OrderDir != "ASC" && f.OrderDir != "DESC" {
 		f.OrderDir = DefaultOrderDir
