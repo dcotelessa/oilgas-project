@@ -7,19 +7,23 @@ import (
 
 // Repositories aggregates all repository interfaces
 type Repositories struct {
-	Customer  CustomerRepository
-	Inventory InventoryRepository
-	Grade     GradeRepository
-	Received  ReceivedRepository
+	Customer      CustomerRepository
+	Inventory     InventoryRepository
+	Grade         GradeRepository
+	Received      ReceivedRepository
+	Analytics     AnalyticsRepository
+	WorkflowState WorkflowStateRepository
 }
 
 // New creates a new repository manager with all implementations
 func New(db *pgxpool.Pool) *Repositories {
 	return &Repositories{
-		Customer:  NewCustomerRepository(db),
-		Inventory: NewInventoryRepository(db),
-		Grade:     NewGradeRepository(db),
-		Received:  NewReceivedRepository(db),
+		Customer:      NewCustomerRepository(db),
+		Inventory:     NewInventoryRepository(db),
+		Grade:         NewGradeRepository(db),
+		Received:      NewReceivedRepository(db),
+		Analytics:     NewAnalyticsRepository(db),
+		WorkflowState: NewWorkflowStateRepository(db),
 	}
 }
 

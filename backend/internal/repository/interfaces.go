@@ -60,6 +60,27 @@ type ReceivedRepository interface {
 	CanDelete(ctx context.Context, id int) (bool, string, error)
 }
 
+// AnalyticsRepository handles dashboard and analytics queries
+type AnalyticsRepository interface {
+	GetDashboardStats(ctx context.Context) (*models.DashboardStats, error)
+	GetJobSummaries(ctx context.Context) ([]models.JobSummary, error)
+	GetRecentActivity(ctx context.Context, limit int) ([]models.ActivityItem, error)
+	GetCustomerActivity(ctx context.Context, days int, customerID *int) (*models.CustomerActivity, error)
+	GetGradeAnalytics(ctx context.Context) (*models.GradeAnalytics, error)
+	GetInventoryTrends(ctx context.Context, days int) (*models.InventoryTrends, error)
+}
+
+// WorkflowStateRepository handles workflow state transitions
+type WorkflowStateRepository interface {
+	AdvanceToProduction(ctx context.Context, workOrder string, username string) error
+	AdvanceToInspection(ctx context.Context, workOrder string, inspectedBy string) error
+	AdvanceToInventory(ctx context.Context, workOrder string) error
+	MarkAsComplete(ctx context.Context, workOrder string) error
+	
+	GetWorkflowStatus(ctx context.Context, workOrder string) (*models.WorkflowStatus, error)
+	GetJobsByState(ctx context.Context, state string, limit, offset int) ([]models.ReceivedItem, int, error)
+}
+
 // Filter structs
 type InventoryFilters struct {
 	CustomerID     *int   `json:"customer_id,omitempty"`
