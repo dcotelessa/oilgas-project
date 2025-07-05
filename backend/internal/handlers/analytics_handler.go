@@ -1,9 +1,9 @@
+// backend/internal/handlers/analytics_handler.go
 package handlers
 
 import (
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"oilgas-backend/internal/services"
@@ -11,29 +11,28 @@ import (
 )
 
 type AnalyticsHandler struct {
-	inventoryService services.InventoryService
-	customerService  services.CustomerService
+	service services.AnalyticsService
 }
 
-func NewAnalyticsHandler(inventoryService services.InventoryService, customerService services.CustomerService) *AnalyticsHandler {
-	return &AnalyticsHandler{
-		inventoryService: inventoryService,
-		customerService:  customerService,
-	}
+func NewAnalyticsHandler(service services.AnalyticsService) *AnalyticsHandler {
+	return &AnalyticsHandler{service: service}
 }
 
-func (h *AnalyticsHandler) GetInventorySummary(c *gin.Context) {
-	summary, err := h.inventoryService.GetSummary(c.Request.Context())
+func (h *AnalyticsHandler) GetDashboardStats(c *gin.Context) {
+	stats, err := h.service.GetDashboardStats(c.Request.Context())
 	if err != nil {
-		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get inventory summary", err)
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get dashboard stats", err)
 		return
 	}
 
-	utils.SuccessResponse(c, summary, "Inventory summary retrieved successfully")
+	utils.SuccessResponse(c, http.StatusOK, gin.H{
+		"dashboard": stats,
+		"generated_at": time.Now().UTC(),
+	})
 }
 
 func (h *AnalyticsHandler) GetCustomerActivity(c *gin.Context) {
-	// Parse date range
+	// Parse parameters
 	days := 30 // default
 	if daysParam := c.Query("days"); daysParam != "" {
 		if d, err := strconv.Atoi(daysParam); err == nil && d > 0 && d <= 365 {
@@ -41,87 +40,58 @@ func (h *AnalyticsHandler) GetCustomerActivity(c *gin.Context) {
 		}
 	}
 
-	// Parse customer ID filter (optional)
-	var customerIDFilter *int
+	var customerID *int
 	if custParam := c.Query("customer_id"); custParam != "" {
 		if id, err := strconv.Atoi(custParam); err == nil {
-			customerIDFilter = &id
+			customerID = &id
 		}
 	}
 
-	// Get all customers for now - in a real implementation you'd have a more efficient method
-	customers, err := h.customerService.GetAll(c.Request.Context())
+	activity, err := h.service.GetCustomerActivity(c.Request.Context(), days, customerID)
 	if err != nil {
-		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get customers", err)
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get customer activity", err)
 		return
 	}
 
-	// Build activity summary
-	activity := gin.H{
-		"period_days":    days,
-		"customer_count": len(customers),
-		"generated_at":   time.Now().UTC(),
-	}
-
-	if customerIDFilter != nil {
-		activity["customer_id"] = *customerIDFilter
-		// Add customer-specific activity here
-	}
-
-	utils.SuccessResponse(c, activity, "Customer activity retrieved successfully")
+	utils.SuccessResponse(c, http.StatusOK, gin.H{
+		"activity": activity,
+		"period_days": days,
+		"customer_id": customerID,
+	})
 }
 
-func (h *AnalyticsHandler) GetTopCustomers(c *gin.Context) {
-	// Parse limit
-	limit := 10
-	if limitParam := c.Query("limit"); limitParam != "" {
-		if l, err := strconv.Atoi(limitParam); err == nil && l > 0 && l <= 50 {
-			limit = l
-		}
-	}
-
-	// Parse time period
-	days := 30
-	if daysParam := c.Query("days"); daysParam != "" {
-		if d, err := strconv.Atoi(daysParam); err == nil && d > 0 && d <= 365 {
-			days = d
-		}
-	}
-
-	// Get customers - simplified implementation
-	customers, err := h.customerService.GetAll(c.Request.Context())
+func (h *AnalyticsHandler) GetInventoryAnalytics(c *gin.Context) {
+	analytics, err := h.service.GetInventoryAnalytics(c.Request.Context())
 	if err != nil {
-		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get customers", err)
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get inventory analytics", err)
 		return
 	}
 
-	// Take only the requested limit
-	if len(customers) > limit {
-		customers = customers[:limit]
-	}
-
-	result := gin.H{
-		"top_customers": customers,
-		"limit":         limit,
-		"period_days":   days,
-	}
-
-	utils.SuccessResponse(c, result, "Top customers retrieved successfully")
+	utils.SuccessResponse(c, http.StatusOK, gin.H{
+		"analytics": analytics,
+	})
 }
 
-func (h *AnalyticsHandler) GetGradeAnalytics(c *gin.Context) {
-	// Get inventory summary which contains grade distribution
-	summary, err := h.inventoryService.GetSummary(c.Request.Context())
+func (h *AnalyticsHandler) GetGradeDistribution(c *gin.Context) {
+	distribution, err := h.service.GetGradeDistribution(c.Request.Context())
 	if err != nil {
-		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get inventory summary", err)
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get grade distribution", err)
 		return
 	}
 
-	analytics := gin.H{
-		"grade_distribution": summary.ItemsByGrade,
-		"total_grades":       len(summary.ItemsByGrade),
-		"generated_at":       time.Now().UTC(),
+	utils.SuccessResponse(c, http.StatusOK, gin.H{
+		"distribution": distribution,
+	})
+}
+
+func (h *AnalyticsHandler) GetLocationUtilization(c *gin.Context) {
+	utilization, err := h.service.GetLocationUtilization(c.Request.Context())
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get location utilization", err)
+		return
 	}
 
-	utils.SuccessResponse(c, analytics, "Grade analytics retrieved successfully")
+	utils.SuccessResponse(c, http.StatusOK, gin.H{
+		"utilization": utilization,
+	})
 }

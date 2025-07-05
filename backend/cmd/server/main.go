@@ -1,4 +1,4 @@
-// backend/cmd/server/main.go
+// backend/cmd/server/main.go - Updated to use actual repository structure
 package main
 
 import (
@@ -19,14 +19,10 @@ import (
 )
 
 func main() {
-	// Load environment variables - try root .env.local first
-	if err := godotenv.Load("../.env.local"); err != nil {
-		if err := godotenv.Load("../.env"); err != nil {
-			if err := godotenv.Load(".env.local"); err != nil {
-				if err := godotenv.Load(".env"); err != nil {
-					log.Println("No .env file found")
-				}
-			}
+	// Load environment variables
+	if err := godotenv.Load("../../.env"); err != nil {
+		if err := godotenv.Load(".env"); err != nil {
+			log.Println("No .env file found")
 		}
 	}
 
@@ -35,7 +31,7 @@ func main() {
 		port = "8000"
 	}
 
-	// Set Gin mode based on environment
+	// Set Gin mode
 	if os.Getenv("APP_ENV") == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -52,24 +48,20 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize cache
+	// Initialize cache with configuration
 	cacheConfig := cache.Config{
 		TTL:             parseEnvDuration("CACHE_TTL", "5m"),
 		CleanupInterval: parseEnvDuration("CACHE_CLEANUP_INTERVAL", "10m"),
 		MaxSize:         parseEnvInt("CACHE_MAX_SIZE", 1000),
 	}
-	cacheService := cache.New(cacheConfig)
+	appCache := cache.New(cacheConfig)
 
-	// Initialize repositories
 	repos := repository.New(db)
 
-	// Initialize services using your existing structure
-	servicesContainer := services.New(repos, cacheService)
+	services := services.New(repos, appCache)
 
-	// Initialize handlers using your existing structure
-	handlersContainer := handlers.New(servicesContainer)
+	handlers := handlers.New(services)
 
-	// Initialize Gin router
 	r := gin.Default()
 
 	// Configure trusted proxies
@@ -80,72 +72,53 @@ func main() {
 
 	// Health check endpoint
 	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
+		// Optionally check repository health
+		healthStatus := gin.H{
 			"status":      "healthy",
 			"service":     "oil-gas-inventory",
 			"version":     "1.0.0",
 			"environment": os.Getenv("APP_ENV"),
-		})
+			"timestamp":   time.Now().UTC(),
+		}
+
+		// Check database connectivity
+		if err := repos.HealthCheck(c.Request.Context()); err != nil {
+			healthStatus["status"] = "unhealthy"
+			healthStatus["database_error"] = err.Error()
+			c.JSON(http.StatusServiceUnavailable, healthStatus)
+			return
+		}
+
+		// Check cache stats
+		cacheStats := appCache.GetStats()
+		healthStatus["cache"] = gin.H{
+			"items":     cacheStats.Items,
+			"hit_ratio": appCache.GetHitRatio(),
+		}
+
+		c.JSON(http.StatusOK, healthStatus)
 	})
 
-	// API routes
+	// API routes using updated handler structure
 	api := r.Group("/api/v1")
 	{
-		// Dashboard routes
-		api.GET("/dashboard", handlersContainer.GetDashboard)
+		// Register all routes through the handlers
+		handlers.RegisterRoutes(api)
 
-		// Customer routes
-		customers := api.Group("/customers")
-		{
-			customers.GET("", handlersContainer.GetCustomers)
-			customers.GET("/:customerID", handlersContainer.GetCustomer)
-			customers.POST("", handlersContainer.CreateCustomer)
-			customers.PUT("/:customerID", handlersContainer.UpdateCustomer)
-			customers.DELETE("/:customerID", handlersContainer.DeleteCustomer)
-			// Customer workflow as a sub-route
-			customers.GET("/:customerID/workflow", handlersContainer.GetCustomerWorkflow)
-		}
-
-		// Inventory routes
-		inventory := api.Group("/inventory")
-		{
-			inventory.GET("", handlersContainer.GetInventory)
-			inventory.GET("/:id", handlersContainer.GetInventoryItem)
-			inventory.POST("", handlersContainer.CreateInventoryItem)
-			inventory.PUT("/:id", handlersContainer.UpdateInventoryItem)
-			inventory.DELETE("/:id", handlersContainer.DeleteInventoryItem)
-			inventory.GET("/summary", handlersContainer.GetInventorySummary)
-		}
-
-		// Search routes
-		search := api.Group("/search")
-		{
-			search.GET("/inventory", handlersContainer.SearchInventory)
-		}
-
-		// Analytics routes
-		analytics := api.Group("/analytics")
-		{
-			analytics.GET("/customers/activity", handlersContainer.GetCustomerActivity)
-			analytics.GET("/customers/top", handlersContainer.GetTopCustomers)
-			analytics.GET("/grades", handlersContainer.GetGradeAnalytics)
-		}
-
-		// Reference data
-		api.GET("/grades", handlersContainer.GetGrades)
-
-		// System routes
-		system := api.Group("/system")
-		{
-			system.GET("/cache/stats", handlersContainer.GetCacheStats)
-			system.POST("/cache/clear", handlersContainer.ClearCache)
-		}
+		// Legacy compatibility endpoints
+		api.GET("/dashboard", getLegacyDashboard(services))
+		api.GET("/search", getLegacySearch(services))
 	}
 
+	// Start server with graceful shutdown support
 	log.Printf("🚀 Server starting on port %s", port)
 	log.Printf("🌍 Environment: %s", os.Getenv("APP_ENV"))
 	log.Printf("🔗 Health check: http://localhost:%s/health", port)
-	log.Printf("📊 API Base: http://localhost:%s/api/v1", port)
+	log.Printf("📊 API: http://localhost:%s/api/v1", port)
+	
+	// Log available repositories
+	log.Printf("📦 Loaded repositories: %v", getRepositoryNames(repos))
+	
 	log.Fatal(r.Run(":" + port))
 }
 
@@ -153,6 +126,7 @@ func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 		
+		// Allow specific origins in development
 		allowedOrigins := []string{
 			"http://localhost:3000",
 			"http://localhost:5173", // Vite dev server
@@ -160,6 +134,7 @@ func corsMiddleware() gin.HandlerFunc {
 			"http://127.0.0.1:5173",
 		}
 		
+		// Check if origin is allowed
 		allowed := false
 		for _, allowedOrigin := range allowedOrigins {
 			if origin == allowedOrigin {
@@ -185,6 +160,50 @@ func corsMiddleware() gin.HandlerFunc {
 	}
 }
 
+// Legacy compatibility functions
+func getLegacyDashboard(services *services.Services) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		stats, err := services.Analytics.GetDashboardStats(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to get dashboard stats",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"dashboard": stats,
+			"message":   "Use /api/v1/analytics/dashboard for new endpoint",
+		})
+	}
+}
+
+func getLegacySearch(services *services.Services) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		query := c.Query("q")
+		if query == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Search query 'q' is required",
+			})
+			return
+		}
+
+		results, err := services.Search.GlobalSearch(c.Request.Context(), query, map[string]interface{}{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Search failed",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"results": results,
+			"message": "Use /api/v1/search for new endpoint",
+		})
+	}
+}
+
+// Utility functions
 func parseEnvDuration(key, defaultValue string) time.Duration {
 	if value := os.Getenv(key); value != "" {
 		if duration, err := time.ParseDuration(value); err == nil {
@@ -202,4 +221,13 @@ func parseEnvInt(key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
+}
+
+func getRepositoryNames(repos *repository.Repositories) []string {
+	repoMap := repos.GetAll()
+	names := make([]string, 0, len(repoMap))
+	for name := range repoMap {
+		names = append(names, name)
+	}
+	return names
 }
