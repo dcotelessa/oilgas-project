@@ -18,10 +18,3 @@ type CustomerGradeUsage struct {
 	TotalJoints  int    `json:"total_joints"`
 }
 
-// Pagination represents pagination metadata
-type Pagination struct {
-	Page       int `json:"page"`
-	PerPage    int `json:"per_page"`
-	Total      int `json:"total"`
-	TotalPages int `json:"total_pages"`
-}

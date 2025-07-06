@@ -7,8 +7,6 @@ import (
 	"log"
 	"time"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"oilgas-backend/internal/models"
 )
 
 
@@ -33,30 +31,6 @@ func New(db *pgxpool.Pool) *Repositories {
 		Received:      NewReceivedRepository(db),
 		WorkflowState: NewWorkflowStateRepository(db),
 	}
-}
-
-func NewAnalyticsRepository(db *pgxpool.Pool) AnalyticsRepository {
-	return &analyticsRepository{db: db}
-}
-
-func NewCustomerRepository(db *pgxpool.Pool) CustomerRepository {
-	return &customerRepository{db: db}
-}
-
-func NewGradeRepository(db *pgxpool.Pool) GradeRepository {
-	return &gradeRepository{db: db}
-}
-
-func NewInventoryRepository(db *pgxpool.Pool) InventoryRepository {
-	return &inventoryRepository{db: db}
-}
-
-func NewReceivedRepository(db *pgxpool.Pool) ReceivedRepository {
-	return &receivedRepository{db: db}
-}
-
-func NewWorkflowStateRepository(db *pgxpool.Pool) WorkflowStateRepository {
-	return &workflowStateRepository{db: db}
 }
 
 // Helper methods for the repository collection
@@ -165,31 +139,6 @@ func (r *Repositories) Close() {
 	// - Cleaning up temporary resources
 	
 	log.Println("Repository connections closed")
-}
-
-// Repository implementation stubs - these match your actual repository files
-type analyticsRepository struct {
-	db *pgxpool.Pool
-}
-
-type customerRepository struct {
-	db *pgxpool.Pool
-}
-
-type gradeRepository struct {
-	db *pgxpool.Pool
-}
-
-type inventoryRepository struct {
-	db *pgxpool.Pool
-}
-
-type receivedRepository struct {
-	db *pgxpool.Pool
-}
-
-type workflowStateRepository struct {
-	db *pgxpool.Pool
 }
 
 // GetRepositoryNames returns a list of available repository names for logging/debugging

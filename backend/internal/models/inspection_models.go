@@ -125,58 +125,6 @@ type InspectionResult struct {
 	Complete    bool        `json:"complete" db:"complete"`
 }
 
-// ColorNumber represents the CN (Color Number) classification
-type ColorNumber int
-
-const (
-	CNPremium   ColorNumber = 1 // WHT - White (Premium Quality)
-	CNStandard  ColorNumber = 2 // BLU - Blue (Standard Quality)
-	CNEconomy   ColorNumber = 3 // GRN - Green (Economy Quality)
-	CNRejected  ColorNumber = 4 // RED - Red (Rejected/Problem)
-	CNGrade5    ColorNumber = 5 // Grade 5 Quality
-	CNGrade6    ColorNumber = 6 // Grade 6 Quality
-)
-
-// GetColorName returns the color name for a CN
-func (cn ColorNumber) GetColorName() string {
-	switch cn {
-	case CNPremium:
-		return "WHT"
-	case CNStandard:
-		return "BLU"
-	case CNEconomy:
-		return "GRN"
-	case CNRejected:
-		return "RED"
-	case CNGrade5:
-		return "Grade 5"
-	case CNGrade6:
-		return "Grade 6"
-	default:
-		return "Unknown"
-	}
-}
-
-// GetQualityDescription returns quality description for CN
-func (cn ColorNumber) GetQualityDescription() string {
-	switch cn {
-	case CNPremium:
-		return "Premium Quality"
-	case CNStandard:
-		return "Standard Quality"
-	case CNEconomy:
-		return "Economy Quality"
-	case CNRejected:
-		return "Rejected/Problem"
-	case CNGrade5:
-		return "Grade 5 Quality"
-	case CNGrade6:
-		return "Grade 6 Quality"
-	default:
-		return "Unknown Quality"
-	}
-}
-
 // FletcherItem methods
 func (f *FletcherItem) IsComplete() bool {
 	return f.Complete

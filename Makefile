@@ -85,6 +85,7 @@ test-integration: ## Run integration tests
 	@echo "🔗 Running integration tests..."
 	@echo "⚠️  Requires test database setup"
 	cd backend && go test ./test/integration/... -v
+	cd backend && go test ./test -run TestIntegration -v
 
 test-api: ## Run API endpoint tests
 	@echo "🌐 Running API tests..."

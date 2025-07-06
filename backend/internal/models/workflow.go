@@ -84,26 +84,6 @@ type Job struct {
 	UpdatedAt    *time.Time             `json:"updated_at,omitempty" db:"updated_at"`
 }
 
-// InspectionResult represents inspection data
-type InspectionResult struct {
-	ID          int         `json:"id" db:"id"`
-	WorkOrder   string      `json:"work_order" db:"wkorder"`
-	Color       string      `json:"color" db:"color"`
-	CN          ColorNumber `json:"cn" db:"cn"`
-	Joints      int         `json:"joints" db:"joints"`
-	Accept      int         `json:"accept" db:"accept"`
-	Reject      int         `json:"reject" db:"reject"`
-	Pin         int         `json:"pin" db:"pin"`
-	Coupling    int         `json:"cplg" db:"cplg"`
-	PC          int         `json:"pc" db:"pc"`
-	Rack        string      `json:"rack,omitempty" db:"rack"`
-	RepairPin   int         `json:"repair_pin" db:"rep_pin"`
-	RepairCplg  int         `json:"repair_cplg" db:"rep_cplg"`
-	RepairPC    int         `json:"repair_pc" db:"rep_pc"`
-	Complete    bool        `json:"complete" db:"complete"`
-}
-
-
 // PipeSize represents size/weight/connection combinations
 type PipeSize struct {
 	ID         int    `json:"id" db:"sizeid"`
@@ -111,16 +91,6 @@ type PipeSize struct {
 	Size       string `json:"size" db:"size"`
 	Weight     string `json:"weight" db:"weight"`
 	Connection string `json:"connection" db:"connection"`
-}
-
-// DashboardStats represents aggregated dashboard data
-type DashboardStats struct {
-	JobSummaries      []JobSummary           `json:"job_summaries"`
-	RecentActivity    []Job                  `json:"recent_activity"`
-	InventoryByGrade  map[string]int         `json:"inventory_by_grade"`
-	PendingRepairs    int                    `json:"pending_repairs"`
-	TotalCustomers    int                    `json:"total_customers"`
-	TopCustomers      []CustomerStats        `json:"top_customers"`
 }
 
 // CustomerStats for dashboard

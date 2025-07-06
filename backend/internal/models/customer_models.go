@@ -49,15 +49,6 @@ type Customer struct {
 	CreatedAt       time.Time `json:"created_at" db:"created_at"`
 }
 
-// CustomerStats represents customer statistics for analytics
-type CustomerStats struct {
-	CustomerID   int    `json:"customer_id"`
-	CustomerName string `json:"customer_name"`
-	ActiveJobs   int    `json:"active_jobs"`
-	TotalJoints  int    `json:"total_joints"`
-	LastActivity *time.Time `json:"last_activity,omitempty"`
-}
-
 // IsActive returns true if customer is not deleted
 func (c *Customer) IsActive() bool {
 	return !c.Deleted
