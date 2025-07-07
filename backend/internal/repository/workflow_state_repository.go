@@ -19,6 +19,8 @@ type WorkflowStateRepository interface {
 	
 	GetWorkflowStatus(ctx context.Context, workOrder string) (*models.WorkflowStatus, error)
 	GetJobsByState(ctx context.Context, state string, limit, offset int) ([]models.ReceivedItem, int, error)
+	GetCurrentState(ctx context.Context, workOrder string) (*string, error)
+	TransitionTo(ctx context.Context, workOrder string, state models.WorkflowState, reason string) error
 }
 
 type workflowStateRepository struct {
@@ -308,4 +310,48 @@ func (r *workflowStateRepository) GetJobsByState(ctx context.Context, state stri
 	}
 
 	return jobs, total, rows.Err()
+}
+
+func (r *workflowStateRepository) TransitionTo(ctx context.Context, workOrder string, state models.WorkflowState, reason string) error {
+	switch state {
+	case models.StateInspection:
+		return r.AdvanceToInspection(ctx, workOrder, "system")
+	case models.StateProduction:
+		// Mark as in production
+		query := `UPDATE store.received SET in_production = NOW() WHERE work_order = $1`
+		_, err := r.db.Exec(ctx, query, workOrder)
+		return err
+	case models.StateInventory:
+		return r.AdvanceToInventory(ctx, workOrder)
+	default:
+		return fmt.Errorf("unsupported state transition: %v", state)
+	}
+}
+
+func (r *workflowStateRepository) GetCurrentState(ctx context.Context, workOrder string) (*string, error) {
+	// Simple state logic based on received item fields
+	query := `
+		SELECT date_received, in_production, inspected_date 
+		FROM store.received 
+		WHERE work_order = $1
+	`
+	
+	var dateReceived, inProduction, inspectedDate *time.Time
+	err := r.db.QueryRow(ctx, query, workOrder).Scan(&dateReceived, &inProduction, &inspectedDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workflow state: %w", err)
+	}
+	
+	var state string
+	if inspectedDate != nil {
+		state = "INSPECTION"
+	} else if inProduction != nil {
+		state = "PRODUCTION" 
+	} else if dateReceived != nil {
+		state = "RECEIVING"
+	} else {
+		state = "unknown"
+	}
+	
+	return &state, nil
 }

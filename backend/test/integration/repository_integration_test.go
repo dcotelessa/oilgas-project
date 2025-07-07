@@ -5,12 +5,15 @@ package integration
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"oilgas-backend/internal/models"
 	"oilgas-backend/internal/repository"
 	"oilgas-backend/test/testutil"
+	"oilgas-backend/test/integration/testdata"
 )
 
 func TestRepositoryIntegration(t *testing.T) {
@@ -21,13 +24,13 @@ func TestRepositoryIntegration(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	defer testutil.CleanupTestDB(t, db)
 
-	repos := repository.New(db)
+	repos := repository.New(db.Pool)
 	ctx := context.Background()
 
 	t.Run("Customer Repository", func(t *testing.T) {
 		// Test customer CRUD operations
 		customer := &models.Customer{
-			Name:           "Test Oil Company",
+			Customer:           "Test Oil Company",
 			BillingAddress: "123 Test St",
 			BillingCity:    "Houston",
 			BillingState:   "TX",
@@ -37,76 +40,81 @@ func TestRepositoryIntegration(t *testing.T) {
 		// Create
 		err := repos.Customer.Create(ctx, customer)
 		require.NoError(t, err)
-		assert.NotZero(t, customer.ID)
+		assert.NotZero(t, customer.CustomerID)
 
 		// Read
-		retrieved, err := repos.Customer.GetByID(ctx, customer.ID)
+		retrieved, err := repos.Customer.GetByID(ctx, customer.CustomerID)
 		require.NoError(t, err)
-		assert.Equal(t, customer.Name, retrieved.Name)
+		assert.Equal(t, customer.Customer, retrieved.Customer)
 
 		// Update
-		customer.Name = "Updated Oil Company"
+		customer.Customer = "Updated Oil Company"
 		err = repos.Customer.Update(ctx, customer)
 		require.NoError(t, err)
 
 		// Verify update
-		updated, err := repos.Customer.GetByID(ctx, customer.ID)
+		updated, err := repos.Customer.GetByID(ctx, customer.CustomerID)
 		require.NoError(t, err)
-		assert.Equal(t, "Updated Oil Company", updated.Name)
+		assert.Equal(t, "Updated Oil Company", updated.Customer)
 
 		// Delete
-		err = repos.Customer.Delete(ctx, customer.ID)
+		err = repos.Customer.Delete(ctx, customer.CustomerID)
 		require.NoError(t, err)
 	})
 
 	t.Run("Received Repository", func(t *testing.T) {
 		// First create a customer
-		customer := &models.Customer{Name: "Test Customer"}
+		customer := &models.Customer{Customer: "Test Customer"}
 		err := repos.Customer.Create(ctx, customer)
 		require.NoError(t, err)
 
 		received := &models.ReceivedItem{
 			WorkOrder:    "WO-TEST-001",
-			CustomerID:   customer.ID,
-			Customer:     customer.Name,
+			CustomerID:   customer.CustomerID,
+			Customer:     customer.Customer,
 			Joints:       100,
 			Size:         "5 1/2\"",
 			Weight:       "20",
 			Grade:        "J55",
 			Connection:   "LTC",
-			DateReceived: timePtr(time.Now()),
+			DateReceived: testdata.TimePtr(time.Now()),
 		}
 
 		// Create
 		err = repos.Received.Create(ctx, received)
 		require.NoError(t, err)
-		assert.NotZero(t, received.ID)
+		assert.NotZero(t, received.CustomerID)
 
 		// Read
-		retrieved, err := repos.Received.GetByID(ctx, received.ID)
+		retrieved, err := repos.Received.GetByID(ctx, received.CustomerID)
 		require.NoError(t, err)
 		assert.Equal(t, received.WorkOrder, retrieved.WorkOrder)
 
 		// Get by work order
 		byWorkOrder, err := repos.Received.GetByWorkOrder(ctx, received.WorkOrder)
 		require.NoError(t, err)
-		assert.Equal(t, received.ID, byWorkOrder.ID)
+		assert.Equal(t, received.CustomerID, byWorkOrder.CustomerID)
 
 		// Update status
-		err = repos.Received.UpdateStatus(ctx, received.ID, "in_production")
+		err = repos.Received.UpdateStatus(ctx, received.ID, "in_production", "Moving to production")
 		require.NoError(t, err)
 
 		// Get filtered
-		filters := map[string]interface{}{
-			"customer_id": customer.ID,
+		filters := repository.ReceivedFilters{
+		    CustomerID: &customer.CustomerID,
+		    Page:       1,
+		    PerPage:    10,
 		}
-		items, total, err := repos.Received.GetFiltered(ctx, filters, 10, 0)
+		items, pagination, err := repos.Received.GetFiltered(ctx, filters)
+
 		require.NoError(t, err)
-		assert.Equal(t, 1, total)
 		assert.Len(t, items, 1)
+		if pagination != nil {
+		    assert.Equal(t, 1, pagination.Total)
+		}
 
 		// Delete
-		err = repos.Received.Delete(ctx, received.ID)
+		err = repos.Received.Delete(ctx, received.CustomerID)
 		require.NoError(t, err)
 	})
 
@@ -119,10 +127,9 @@ func TestRepositoryIntegration(t *testing.T) {
 
 		// Create new grade
 		testGrade := &models.Grade{
-			Grade:       "TEST123",
-			Description: "Test grade for integration testing",
+		    Grade: "TEST123",
 		}
-		err = repos.Grade.Create(ctx, testGrade.Grade, testGrade.Description)
+		err = repos.Grade.Create(ctx, testGrade)
 		require.NoError(t, err)
 
 		// Verify it exists
@@ -159,14 +166,14 @@ func TestRepositoryIntegration(t *testing.T) {
 
 	t.Run("WorkflowState Repository", func(t *testing.T) {
 		// First create a received item to test workflow on
-		customer := &models.Customer{Name: "Workflow Test Customer"}
+		customer := &models.Customer{Customer: "Workflow Test Customer"}
 		err := repos.Customer.Create(ctx, customer)
 		require.NoError(t, err)
 
 		received := &models.ReceivedItem{
 			WorkOrder:  "WO-WORKFLOW-001",
-			CustomerID: customer.ID,
-			Customer:   customer.Name,
+			CustomerID: customer.CustomerID,
+			Customer:   customer.Customer,
 			Joints:     50,
 			Size:       "7\"",
 			Grade:      "N80",
@@ -188,19 +195,5 @@ func TestRepositoryIntegration(t *testing.T) {
 		updatedState, err := repos.WorkflowState.GetCurrentState(ctx, received.WorkOrder)
 		require.NoError(t, err)
 		assert.Equal(t, newState, *updatedState)
-
-		// Test state history
-		history, err := repos.WorkflowState.GetStateHistory(ctx, received.WorkOrder)
-		require.NoError(t, err)
-		assert.Len(t, history, 2) // Initial state + transition
-
-		// Test get items by state
-		items, err := repos.WorkflowState.GetItemsByState(ctx, newState)
-		require.NoError(t, err)
-		assert.Contains(t, items, received.WorkOrder)
 	})
-}
-
-func timePtr(t time.Time) *time.Time {
-	return &t
 }

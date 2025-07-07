@@ -306,3 +306,33 @@ func (r *receivedRepository) CanDelete(ctx context.Context, id int) (bool, strin
 	
 	return true, "", nil
 }
+
+func (r *receivedRepository) GetByWorkOrder(ctx context.Context, workOrder string) (*models.ReceivedItem, error) {
+	query := `
+		SELECT id, work_order, customer_id, customer, joints, rack, size_id, size, weight, grade, connection,
+		       ctd, w_string, well, lease, ordered_by, notes, customer_po, date_received, background,
+		       norm, services, bill_to_id, entered_by, when_entered, when_updated, trucking, trailer,
+		       in_production, inspected_date, created_at
+		FROM store.received 
+		WHERE work_order = $1 AND deleted = false
+	`
+	
+	item := &models.ReceivedItem{}
+	err := r.db.QueryRow(ctx, query, workOrder).Scan(
+		&item.ID, &item.WorkOrder, &item.CustomerID, &item.Customer,
+		&item.Joints, &item.Rack, &item.SizeID, &item.Size, &item.Weight,
+		&item.Grade, &item.Connection, &item.CTD, &item.WString,
+		&item.Well, &item.Lease, &item.OrderedBy, &item.Notes,
+		&item.CustomerPO, &item.DateReceived, &item.Background,
+		&item.Norm, &item.Services, &item.BillToID, &item.EnteredBy,
+		&item.WhenEntered, &item.WhenUpdated, &item.Trucking, &item.Trailer,
+		&item.InProduction, &item.InspectedDate, &item.CreatedAt,
+	)
+	
+	if err != nil {
+		return nil, fmt.Errorf("failed to get received item by work order: %w", err)
+	}
+	
+	return item, nil
+}
+

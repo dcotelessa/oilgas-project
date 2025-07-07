@@ -58,6 +58,7 @@ type ReceivedRepository interface {
 	GetFiltered(ctx context.Context, filters ReceivedFilters) ([]models.ReceivedItem, *models.Pagination, error)
 	UpdateStatus(ctx context.Context, id int, status string, notes string) error
 	CanDelete(ctx context.Context, id int) (bool, string, error)
+	GetByWorkOrder(ctx context.Context, workOrder string) (*models.ReceivedItem, error)
 }
 
 // Filter structs

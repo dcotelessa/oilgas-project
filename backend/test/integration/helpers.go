@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"oilgas-backend/internal/models"
 	"oilgas-backend/internal/repository"
+	"oilgas-backend/test/integration/testdata"
 )
 
 // IntegrationHelper provides common test helper functions
@@ -36,9 +37,8 @@ func (h *IntegrationHelper) CreateCompleteWorkflow(t *testing.T, customer *model
 		Size:         "5 1/2\"",
 		Grade:        "J55",
 		Connection:   "LTC",
-		Color:        "RED",
-		Location:     "Test Yard",
-		DateReceived: timePtr(time.Now()),
+		DateReceived: testdata.TimePtr(time.Now()), // USE testdata.TimePtr
+		Notes:        "Test complete workflow",
 	}
 	
 	err := h.repos.Received.Create(h.ctx, received)
@@ -58,7 +58,7 @@ func (h *IntegrationHelper) CreateCompleteWorkflow(t *testing.T, customer *model
 		Grade:          received.Grade,
 		PassedJoints:   95,
 		FailedJoints:   5,
-		InspectionDate: timePtr(time.Now().Add(time.Hour)),
+		InspectionDate: testdata.TimePtr(time.Now().Add(time.Hour)), // USE testdata.TimePtr
 		Inspector:      "Test Inspector",
 		Notes:          "Standard inspection completed",
 	}
@@ -81,7 +81,7 @@ func (h *IntegrationHelper) CreateCompleteWorkflow(t *testing.T, customer *model
 		Connection: received.Connection,
 		Color:      "PROCESSED",
 		Location:   "Main Storage",
-		DateIn:     timePtr(time.Now().Add(2 * time.Hour)),
+		DateIn:     testdata.TimePtr(time.Now().Add(2 * time.Hour)), // USE testdata.TimePtr
 	}
 	
 	err = h.repos.Inventory.Create(h.ctx, inventory)
@@ -92,7 +92,7 @@ func (h *IntegrationHelper) CreateCompleteWorkflow(t *testing.T, customer *model
 
 // SetupMultiCustomerData creates a realistic multi-customer dataset
 func (h *IntegrationHelper) SetupMultiCustomerData(t *testing.T) ([]*models.Customer, []*models.ReceivedItem, []*models.InspectionItem) {
-	fixtures := NewTestFixtures()
+	fixtures := testdata.NewTestFixtures() // CHANGE TO testdata.NewTestFixtures()
 	customers := fixtures.StandardCustomers()
 	
 	// Create customers
@@ -104,7 +104,7 @@ func (h *IntegrationHelper) SetupMultiCustomerData(t *testing.T) ([]*models.Cust
 	var allReceived []*models.ReceivedItem
 	var allInspections []*models.InspectionItem
 
-	// Create data for each customer
+	// Create data for each customer using your existing fixtures
 	for i, customer := range customers {
 		itemCount := 3 + i // Varying amounts per customer
 		receivedItems := fixtures.ReceivedItemsForCustomer(customer, itemCount)
@@ -133,7 +133,11 @@ func (h *IntegrationHelper) SetupMultiCustomerData(t *testing.T) ([]*models.Cust
 // VerifyDataConsistency checks that data relationships are maintained
 func (h *IntegrationHelper) VerifyDataConsistency(t *testing.T) {
 	// Check that all received items have valid customers
-	received, _, err := h.repos.Received.GetFiltered(h.ctx, map[string]interface{}{}, 1000, 0)
+	receivedFilters := repository.ReceivedFilters{
+		Page:    1,
+		PerPage: 1000,
+	}
+	received, _, err := h.repos.Received.GetFiltered(h.ctx, receivedFilters)
 	require.NoError(t, err)
 	
 	for _, item := range received {
@@ -143,7 +147,11 @@ func (h *IntegrationHelper) VerifyDataConsistency(t *testing.T) {
 	}
 
 	// Check that all inspections reference valid received items
-	inspections, _, err := h.repos.Inspected.GetFiltered(h.ctx, map[string]interface{}{}, 1000, 0)
+	inspectedFilters := repository.InspectedFilters{
+		Page:    1,
+		PerPage: 1000,
+	}
+	inspections, _, err := h.repos.Inspected.GetFiltered(h.ctx, inspectedFilters)
 	require.NoError(t, err)
 	
 	for _, inspection := range inspections {
@@ -163,21 +171,23 @@ func (h *IntegrationHelper) VerifyDataConsistency(t *testing.T) {
 
 // CleanupTestData removes all test data (useful for teardown)
 func (h *IntegrationHelper) CleanupTestData(t *testing.T) {
-	tables := []string{
-		"store.workflow_state_history",
-		"store.workflow_states", 
-		"store.inventory",
-		"store.inspected",
-		"store.received",
-		"store.customers",
+	// Use direct database access through one of the repos
+	queries := []string{
+		"DELETE FROM store.workflow_state_history",
+		"DELETE FROM store.workflow_states", 
+		"DELETE FROM store.inspected",
+		"DELETE FROM store.inventory",
+		"DELETE FROM store.received",
+		"DELETE FROM store.customers",
 	}
-
-	for _, table := range tables {
-		_, err := h.repos.Customer.(*customerRepository).db.Exec(h.ctx, fmt.Sprintf("DELETE FROM %s", table))
-		require.NoError(t, err)
+	
+	// Access the underlying pool through a public interface
+	pool := h.repos.GetPool()
+	
+	for _, query := range queries {
+		_, err := pool.Exec(h.ctx, query)
+		if err != nil {
+			t.Logf("Cleanup warning for query '%s': %v", query, err)
+		}
 	}
-}
-
-func timePtr(t time.Time) *time.Time {
-	return &t
 }

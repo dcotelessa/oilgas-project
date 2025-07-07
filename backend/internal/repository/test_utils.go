@@ -188,11 +188,6 @@ func (db *TestDB) SeedGrades(t *testing.T) {
 	}
 }
 
-// Helper function to create time pointers
-func timePtr(t time.Time) *time.Time {
-	return &t
-}
-
 // AssertCustomersEqual compares two customers for testing
 func AssertCustomersEqual(t *testing.T, expected, actual *models.Customer) {
 	require.NotNil(t, expected)
@@ -250,4 +245,9 @@ func BenchmarkRepository(b *testing.B, setupFunc func() *pgxpool.Pool, testFunc 
 	for i := 0; i < b.N; i++ {
 		testFunc(pool)
 	}
+}
+
+// timePtr helper function for tests
+func timePtr(t time.Time) *time.Time {
+	return &t
 }

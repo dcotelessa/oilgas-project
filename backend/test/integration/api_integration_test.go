@@ -3,18 +3,16 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"oilgas-backend/internal/handlers"
@@ -23,6 +21,7 @@ import (
 	"oilgas-backend/internal/services"
 	"oilgas-backend/pkg/cache"
 	"oilgas-backend/test/testutil"
+	"oilgas-backend/test/integration/testdata"
 )
 
 type APIIntegrationTestSuite struct {
@@ -269,7 +268,7 @@ func (s *APIIntegrationTestSuite) TestWorkflowAPI() {
 		Joints:       100,
 		Size:         "5 1/2\"",
 		Grade:        "J55",
-		DateReceived: timePtr(time.Now()),
+		DateReceived: testdata.TimePtr(time.Now()),
 	}
 	err = s.repos.Received.Create(context.Background(), received)
 	s.Require().NoError(err)
@@ -349,7 +348,7 @@ func (s *APIIntegrationTestSuite) TestAnalyticsAPI() {
 			Joints:       100 + i*10,
 			Size:         "5 1/2\"",
 			Grade:        []string{"J55", "L80", "N80"}[i%3],
-			DateReceived: timePtr(time.Now().AddDate(0, 0, -i)),
+			DateReceived: testdata.TimePtr(time.Now().AddDate(0, 0, -i)),
 		}
 		err = s.repos.Received.Create(context.Background(), received)
 		s.Require().NoError(err)
@@ -365,7 +364,7 @@ func (s *APIIntegrationTestSuite) TestAnalyticsAPI() {
 				Grade:          received.Grade,
 				PassedJoints:   received.Joints - 5,
 				FailedJoints:   5,
-				InspectionDate: timePtr(time.Now().AddDate(0, 0, -i+1)),
+				InspectionDate: testdata.TimePtr(time.Now().AddDate(0, 0, -i+1)),
 				Inspector:      "API Inspector",
 			}
 			err = s.repos.Inspected.Create(context.Background(), inspection)
@@ -806,8 +805,4 @@ func TestAPIIntegrationSuite(t *testing.T) {
 	}
 	
 	suite.Run(t, new(APIIntegrationTestSuite))
-}
-
-func timePtr(t time.Time) *time.Time {
-	return &t
 }

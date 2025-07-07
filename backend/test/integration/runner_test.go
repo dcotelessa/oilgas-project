@@ -2,10 +2,8 @@
 package integration
 
 import (
-	"context"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/suite"
 	"oilgas-backend/test/testutil"

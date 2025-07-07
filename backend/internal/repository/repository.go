@@ -19,6 +19,7 @@ type Repositories struct {
 	Inventory     InventoryRepository
 	Received      ReceivedRepository
 	WorkflowState WorkflowStateRepository
+	Inspected     InspectedRepository
 }
 
 // New creates repository instances with your actual implementations
@@ -30,6 +31,7 @@ func New(db *pgxpool.Pool) *Repositories {
 		Inventory:     NewInventoryRepository(db),
 		Received:      NewReceivedRepository(db),
 		WorkflowState: NewWorkflowStateRepository(db),
+		Inspected:     NewInspectedRepository(db),
 	}
 }
 
@@ -160,4 +162,10 @@ func (r *Repositories) Stats() map[string]interface{} {
 		"repository_names":   r.GetRepositoryNames(),
 		"initialized":        true,
 	}
+}
+
+// GetPool returns the underlying database pool for testing purposes only
+func (r *Repositories) GetPool() *pgxpool.Pool {
+	// Access through the customer repository since all repos use the same pool
+	return r.Customer.(*customerRepository).db
 }

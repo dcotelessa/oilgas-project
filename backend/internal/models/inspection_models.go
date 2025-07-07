@@ -245,3 +245,52 @@ func (ir *InspectionResult) GetRepairSummary() string {
 	
 	return strings.Join(repairs, ", ")
 }
+
+// InspectionItem represents items that have been inspected
+type InspectionItem struct {
+	ID             int        `json:"id" db:"id"`
+	WorkOrder      string     `json:"work_order" db:"work_order"`
+	CustomerID     int        `json:"customer_id" db:"customer_id"`
+	Customer       string     `json:"customer" db:"customer"`
+	Joints         int        `json:"joints" db:"joints"`
+	Size           string     `json:"size" db:"size"`
+	Weight         string     `json:"weight" db:"weight"`
+	Grade          string     `json:"grade" db:"grade"`
+	Connection     string     `json:"connection" db:"connection"`
+	PassedJoints   int        `json:"passed_joints" db:"passed_joints"`
+	FailedJoints   int        `json:"failed_joints" db:"failed_joints"`
+	InspectionDate *time.Time `json:"inspection_date" db:"inspection_date"`
+	Inspector      string     `json:"inspector" db:"inspector"`
+	Notes          string     `json:"notes" db:"notes"`
+	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+func (i *InspectionItem) GetPassRate() float64 {
+	if i.Joints == 0 {
+		return 0
+	}
+	return float64(i.PassedJoints) / float64(i.Joints) * 100
+}
+
+func (i *InspectionItem) IsComplete() bool {
+	return i.PassedJoints+i.FailedJoints == i.Joints
+}
+
+func (i *InspectionItem) GetStatus() string {
+	if !i.IsComplete() {
+		return "in_progress"
+	}
+	
+	passRate := i.GetPassRate()
+	switch {
+	case passRate >= 95:
+		return "excellent"
+	case passRate >= 85:
+		return "good"
+	case passRate >= 70:
+		return "fair"
+	default:
+		return "poor"
+	}
+}

@@ -1,10 +1,16 @@
 // backend/test/integration/testdata/fixtures.go
-package integration
+package testdata
 
 import (
+	"fmt"
 	"time"
 	"oilgas-backend/internal/models"
 )
+
+// TimePtr converts time.Time to *time.Time
+func TimePtr(t time.Time) *time.Time {
+	return &t
+}
 
 // TestFixtures provides reusable test data
 type TestFixtures struct{}
@@ -90,9 +96,9 @@ func (f *TestFixtures) ReceivedItemsForCustomer(customer *models.Customer, count
 			Weight:       fmt.Sprintf("%d", 15+(i*5)%30), // Vary weight
 			Grade:        grades[i%len(grades)],
 			Connection:   connections[i%len(connections)],
-			Color:        []string{"RED", "BLUE", "GREEN", "YELLOW", "BLACK"}[i%5],
-			Location:     fmt.Sprintf("Yard %c", 'A'+rune(i%4)),
-			DateReceived: timePtr(time.Now().AddDate(0, 0, -(i+1))),
+			// REMOVED: Color and Location fields - they don't exist in ReceivedItem
+			DateReceived: TimePtr(time.Now().AddDate(0, 0, -(i+1))),
+			Notes:        fmt.Sprintf("Test received item %d for %s", i+1, customer.Customer),
 		}
 	}
 	
@@ -118,7 +124,7 @@ func (f *TestFixtures) InspectionItemsFromReceived(received []*models.ReceivedIt
 			Connection:     item.Connection,
 			PassedJoints:   passedJoints,
 			FailedJoints:   failedJoints,
-			InspectionDate: timePtr(item.DateReceived.Add(24 * time.Hour)),
+			InspectionDate: TimePtr(item.DateReceived.Add(24 * time.Hour)),
 			Inspector:      []string{"John Doe", "Jane Smith", "Bob Wilson"}[i%3],
 			Notes:          fmt.Sprintf("Inspection completed. %d joints failed quality check.", failedJoints),
 		}
@@ -140,12 +146,11 @@ func (f *TestFixtures) InventoryItemsFromInspections(inspections []*models.Inspe
 			Weight:     inspection.Weight,
 			Grade:      inspection.Grade,
 			Connection: inspection.Connection,
-			Color:      "PROCESSED", // Mark as processed
-			Location:   "Main Storage",
-			DateIn:     timePtr(inspection.InspectionDate.Add(48 * time.Hour)),
+			Color:      "PROCESSED", // InventoryItem HAS Color field
+			Location:   "Main Storage", // InventoryItem HAS Location field
+			DateIn:     TimePtr(inspection.InspectionDate.Add(48 * time.Hour)),
 		}
 	}
 	
 	return inventory
 }
-
