@@ -68,6 +68,7 @@ type InventoryFilters struct {
 	Color          string `json:"color,omitempty"`
 	Location       string `json:"location,omitempty"`
 	Rack           string `json:"rack,omitempty"`
+	Connection     string `json:"connection,omitempty"`
 	MinJoints      *int   `json:"min_joints,omitempty"`
 	MaxJoints      *int   `json:"max_joints,omitempty"`
 	DateFrom       string `json:"date_from,omitempty"`

@@ -98,9 +98,11 @@ func (s *customerService) Create(ctx context.Context, req *validation.CustomerVa
 		return nil, fmt.Errorf("customer with name '%s' already exists", req.CustomerName)
 	}
 
-	// Create through repository
-	customer, err := s.repo.Create(ctx, req)
-	if err != nil {
+	// Convert validation to model
+	customer := req.ToCustomerModel()
+
+	// Create through repository (returns only error, not customer)
+	if err := s.repo.Create(ctx, customer); err != nil {
 		return nil, fmt.Errorf("failed to create customer: %w", err)
 	}
 
@@ -145,9 +147,11 @@ func (s *customerService) Update(ctx context.Context, idStr string, req *validat
 	}
 
 	// Update through repository
-	customer, err := s.repo.Update(ctx, id, req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update customer: %w", err)
+	customer := req.ToCustomerModel()
+	customer.CustomerID = id
+
+	if err := s.repo.Update(ctx, customer); err != nil {
+	    return nil, fmt.Errorf("failed to update customer: %w", err)
 	}
 
 	// Update cache
@@ -158,9 +162,9 @@ func (s *customerService) Update(ctx context.Context, idStr string, req *validat
 	s.invalidateCustomerCaches()
 
 	// If customer name changed, invalidate name-based caches
-	if existing.CustomerName != customer.CustomerName {
-		s.cache.Delete(fmt.Sprintf("customer:name:%s", strings.ToLower(existing.CustomerName)))
-		s.cache.Delete(fmt.Sprintf("customer:name:%s", strings.ToLower(customer.CustomerName)))
+	if existing.Customer != customer.Customer {
+		s.cache.Delete(fmt.Sprintf("customer:name:%s", strings.ToLower(existing.Customer)))
+		s.cache.Delete(fmt.Sprintf("customer:name:%s", strings.ToLower(customer.Customer)))
 	}
 
 	return customer, nil
@@ -197,7 +201,7 @@ func (s *customerService) Delete(ctx context.Context, idStr string) error {
 	// Remove from cache
 	cacheKey := fmt.Sprintf("customer:%d", id)
 	s.cache.Delete(cacheKey)
-	s.cache.Delete(fmt.Sprintf("customer:name:%s", strings.ToLower(existing.CustomerName)))
+	s.cache.Delete(fmt.Sprintf("customer:name:%s", strings.ToLower(existing.Customer)))
 	
 	// Invalidate relevant caches
 	s.invalidateCustomerCaches()

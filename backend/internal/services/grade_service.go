@@ -69,19 +69,11 @@ func (s *gradeService) GetAll(ctx context.Context) ([]models.Grade, error) {
 		}
 	}
 
-	// Get from repository
-	gradeNames, err := s.gradeRepo.GetAll(ctx)
+	grades, err := s.gradeRepo.GetAll(ctx) // Returns []models.Grade directly
 	if err != nil {
 		return nil, fmt.Errorf("failed to get grades: %w", err)
 	}
 
-	// Convert to Grade models
-	grades := make([]models.Grade, len(gradeNames))
-	for i, gradeName := range gradeNames {
-		grades[i] = models.Grade{Grade: gradeName}
-	}
-
-	// Cache for 30 minutes (grades don't change often)
 	s.cache.SetWithTTL(cacheKey, grades, 30*time.Minute)
 
 	return grades, nil
@@ -134,23 +126,13 @@ func (s *gradeService) Create(ctx context.Context, req *validation.GradeValidati
 		return nil, fmt.Errorf("grade %s already exists", normalizedName)
 	}
 
-	// Create in repository
 	if err := s.gradeRepo.Create(ctx, &models.Grade{
-		Grade:       normalizedName,
-		Description: req.Description,
+		Grade: normalizedName, // Only Grade field
 	}); err != nil {
 		return nil, fmt.Errorf("failed to create grade: %w", err)
 	}
 
-	// Create the response model
-	grade := &models.Grade{
-		Grade:       normalizedName,
-		Description: req.Description,
-	}
-
-	// Invalidate cache
-	s.cache.Delete("grades:all")
-	s.cache.Delete(fmt.Sprintf("grade:%s", normalizedName))
+	grade := &models.Grade{Grade: normalizedName}
 
 	return grade, nil
 }
@@ -166,9 +148,9 @@ func (s *gradeService) Update(ctx context.Context, gradeName string, req *valida
 	newNormalizedName := s.NormalizeGradeName(req.Grade)
 
 	// Check if grade exists
-	existing, err := s.GetByName(ctx, normalizedName)
-	if err != nil {
-		return nil, fmt.Errorf("grade %s not found: %w", gradeName, err)
+	existing, _ := s.GetByName(ctx, normalizedName)
+	if existing != nil {
+		return nil, fmt.Errorf("grade %s not found", gradeName)
 	}
 
 	// If name is changing, check new name doesn't exist
@@ -191,7 +173,6 @@ func (s *gradeService) Update(ctx context.Context, gradeName string, req *valida
 	// Update the grade (implementation depends on your repository interface)
 	updatedGrade := &models.Grade{
 		Grade:       newNormalizedName,
-		Description: req.Description,
 	}
 
 	// For now, we'll delete and recreate since the repository interface might not support update
@@ -511,28 +492,21 @@ func (s *gradeService) GetUnusedGrades(ctx context.Context) ([]models.Grade, err
 // Cache management
 
 func (s *gradeService) RefreshCache(ctx context.Context) error {
-	// Clear all grade-related caches
-	patterns := []string{
-		"grades:",
-		"grade:",
+	// Manual cache deletion
+	s.cache.Delete("grades:all")
+	s.cache.Delete("grades:distribution")
+	s.cache.Delete("grades:unused")
+
+	// Clear individual grade caches
+	if grades, err := s.gradeRepo.GetAll(ctx); err == nil {
+		for _, grade := range grades {
+			s.cache.Delete(fmt.Sprintf("grade:%s", grade.Grade))
+		}
 	}
 
-	for _, pattern := range patterns {
-		s.cache.DeletePattern(pattern)
-	}
-
-	// Pre-warm cache with fresh data
+	// Pre-warm cache
 	_, err := s.GetAll(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to refresh grades cache: %w", err)
-	}
-
-	_, err = s.GetGradeDistribution(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to refresh grade distribution cache: %w", err)
-	}
-
-	return nil
+	return err
 }
 
 // Helper methods

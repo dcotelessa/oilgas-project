@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -79,6 +80,24 @@ func (c *Cache) Set(key string, value interface{}) {
 	c.updateStats(func(s *Stats) { s.Items = len(c.items) })
 }
 
+func (c *Cache) SetWithTTL(key string, value interface{}, ttl time.Duration) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	// Check if we need to evict items
+	if len(c.items) >= c.config.MaxSize {
+		c.evictLRU()
+	}
+
+	c.items[key] = &cacheItem{
+		value:      value,
+		expiration: time.Now().Add(ttl), // Use custom TTL instead of config TTL
+		lastAccess: time.Now(),
+	}
+
+	c.updateStats(func(s *Stats) { s.Items = len(c.items) })
+}
+
 func (c *Cache) Get(key string) (interface{}, bool) {
 	c.mutex.RLock()
 	item, exists := c.items[key]
@@ -117,6 +136,31 @@ func (c *Cache) Clear() {
 	defer c.mutex.Unlock()
 	c.items = make(map[string]*cacheItem)
 	c.updateStats(func(s *Stats) { s.Items = 0 })
+}
+
+// DeletePattern deletes all cache keys matching a pattern (prefix)
+func (c *Cache) DeletePattern(pattern string) int {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	
+	var keysToDelete []string
+	for key := range c.items {
+		if strings.HasPrefix(key, pattern) {
+			keysToDelete = append(keysToDelete, key)
+		}
+	}
+	
+	deleted := len(keysToDelete)
+	for _, key := range keysToDelete {
+		delete(c.items, key)
+	}
+	
+	c.updateStats(func(s *Stats) { 
+		s.Items = len(c.items)
+		s.Evictions += int64(deleted)
+	})
+	
+	return deleted
 }
 
 // Domain-specific cache methods for oil & gas inventory
