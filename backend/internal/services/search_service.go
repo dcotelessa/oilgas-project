@@ -119,14 +119,14 @@ func (s *searchService) GlobalSearch(ctx context.Context, query string, limit, o
 	received, receivedTotal, err := s.SearchReceived(ctx, query, receivedFilters, limit/3, 0)
 	if err == nil {
 		for _, item := range received {
-			results.Results = append(results.Results, SearchResult{
-				Type:        "received",
-				ID:          item.ID,
-				Title:       fmt.Sprintf("WO-%s: %s", item.WorkOrder, item.Customer),
-				Description: fmt.Sprintf("%d joints of %s %s %s - %s", item.Joints, item.Size, item.Weight, item.Grade, item.CurrentState),
-				Data:        item,
-				Relevance:   s.calculateReceivedRelevance(item, query),
-			})
+		    results.Results = append(results.Results, SearchResult{
+			Type:        "received",
+			ID:          item.ID,
+			Title:       fmt.Sprintf("WO-%s: %s", item.WorkOrder, item.Customer),
+			Description: fmt.Sprintf("%d joints of %s %s %s - %s", item.Joints, item.Size, item.Weight, item.Grade, item.GetCurrentState()), // Call method instead
+			Data:        item,
+			Relevance:   s.calculateReceivedRelevance(item, query),
+		    })
 		}
 		results.TotalHits += receivedTotal
 	}
@@ -233,11 +233,6 @@ func (s *searchService) SearchReceived(ctx context.Context, query string, filter
 		total = pagination.Total
 	}
 
-	// Set current state for each item
-	for i := range items {
-		items[i].CurrentState = items[i].GetCurrentState()
-	}
-
 	// Cache result
 	result := CachedReceivedSearchResult{Items: items, Total: total}
 	s.cache.SetWithTTL(cacheKey, result, 3*time.Minute)
@@ -271,22 +266,29 @@ func (s *searchService) SearchByWorkOrder(ctx context.Context, workOrder string)
 
 	receivedItems, _, err := s.receivedRepo.GetFiltered(ctx, receivedFilters)
 	if err == nil && len(receivedItems) > 0 {
-		result.Found = true
-		result.ReceivedItem = &receivedItems[0]
-		result.ReceivedItem.CurrentState = result.ReceivedItem.GetCurrentState()
+	    result.Found = true
+	    result.ReceivedItem = &receivedItems[0]
 	}
 
 	// Search in inventory
 	inventoryFilters := repository.InventoryFilters{
-		WorkOrder: &workOrder,
 		Page:      1,
 		PerPage:   10,
 	}
 
 	inventoryItems, _, err := s.inventoryRepo.GetFiltered(ctx, inventoryFilters)
-	if err == nil && len(inventoryItems) > 0 {
+	if err == nil {
+	    // Manual filtering by work order since the filter doesn't support it
+	    var matchingItems []models.InventoryItem
+	    for _, item := range inventoryItems {
+		if item.WorkOrder == workOrder {
+		    matchingItems = append(matchingItems, item)
+		}
+	    }
+	    if len(matchingItems) > 0 {
 		result.Found = true
-		result.InventoryItems = inventoryItems
+		result.InventoryItems = matchingItems
+	    }
 	}
 
 	// Cache result
@@ -343,11 +345,16 @@ func (s *searchService) SearchByCustomer(ctx context.Context, customerQuery stri
 	}
 
 	received, _, err := s.receivedRepo.GetFiltered(ctx, receivedFilters)
+
 	if err == nil {
-		for i := range received {
-			received[i].CurrentState = received[i].GetCurrentState()
-		}
-		result.ReceivedItems = received
+	var receivedResults []models.ReceivedResult
+
+	for _, item := range received {
+		receivedResults = append(receivedResults, models.CreateReceivedResult(item, 1.0, []string{}))
+	}
+
+	result.ReceivedItems = received // Keep original for now, or change type if needed
+
 	}
 
 	// Cache result
@@ -357,76 +364,76 @@ func (s *searchService) SearchByCustomer(ctx context.Context, customerQuery stri
 }
 
 func (s *searchService) SearchBySpecs(ctx context.Context, size, grade, connection string) (*SpecSearchResult, error) {
-	cacheKey := fmt.Sprintf("search:specs:%s:%s:%s", size, grade, connection)
-	
-	// Try cache first
-	if cached, exists := s.cache.Get(cacheKey); exists {
-		if result, ok := cached.(*SpecSearchResult); ok {
-			return result, nil
-		}
-	}
+    cacheKey := fmt.Sprintf("search:specs:%s:%s:%s", size, grade, connection)
+    
+    if cached, exists := s.cache.Get(cacheKey); exists {
+        if result, ok := cached.(*SpecSearchResult); ok {
+            return result, nil
+        }
+    }
 
-	result := &SpecSearchResult{
-		Size:       size,
-		Grade:      grade,
-		Connection: connection,
-	}
+    result := &SpecSearchResult{
+        Size:       size,
+        Grade:      grade,
+        Connection: connection,
+    }
 
-	// Build filters for inventory search
-	inventoryFilters := repository.InventoryFilters{
-		Page:    1,
-		PerPage: 100,
-	}
+    // Build filters for inventory search
+    inventoryFilters := repository.InventoryFilters{
+        Page:    1,
+        PerPage: 100,
+    }
 
-	if size != "" {
-		inventoryFilters.Size = &size
-	}
-	if grade != "" {
-		inventoryFilters.Grade = &grade
-	}
-	if connection != "" {
-		inventoryFilters.Connection = &connection
-	}
+    if size != "" {
+        inventoryFilters.Size = size  // Changed from &size
+    }
+    if grade != "" {
+        inventoryFilters.Grade = grade  // Changed from &grade
+    }
+    if connection != "" {
+        inventoryFilters.Connection = connection  // Changed from &connection
+    }
 
-	// Search inventory
-	inventory, _, err := s.inventoryRepo.GetFiltered(ctx, inventoryFilters)
-	if err == nil {
-		result.InventoryItems = inventory
-	}
+    // Search inventory
+    inventory, _, err := s.inventoryRepo.GetFiltered(ctx, inventoryFilters)
+    if err == nil {
+        result.InventoryItems = inventory
+    }
 
-	// Build filters for received search
-	receivedFilters := repository.ReceivedFilters{
-		Page:    1,
-		PerPage: 100,
-	}
+    // Build filters for received search
+    receivedFilters := repository.ReceivedFilters{
+        Page:    1,
+        PerPage: 100,
+    }
 
-	if size != "" {
-		receivedFilters.Size = &size
-	}
-	if grade != "" {
-		receivedFilters.Grade = &grade
-	}
-	if connection != "" {
-		receivedFilters.Connection = &connection
-	}
+    // These are correct - ReceivedFilters expects *string
+    if size != "" {
+        sizeValue := size
+        receivedFilters.Size = &sizeValue
+    }
+    if grade != "" {
+        gradeValue := grade  
+        receivedFilters.Grade = &gradeValue
+    }
+    if connection != "" {
+        connectionValue := connection
+        receivedFilters.Connection = &connectionValue
+    }
 
-	// Search received items
-	received, _, err := s.receivedRepo.GetFiltered(ctx, receivedFilters)
-	if err == nil {
-		for i := range received {
-			received[i].CurrentState = received[i].GetCurrentState()
-		}
-		result.ReceivedItems = received
-	}
+    // Search received items
+    received, _, err := s.receivedRepo.GetFiltered(ctx, receivedFilters)
+    if err == nil {
+        result.ReceivedItems = received
+    }
 
-	// Calculate totals
-	result.TotalInventory = len(result.InventoryItems)
-	result.TotalReceived = len(result.ReceivedItems)
+    // Calculate totals
+    result.TotalInventory = len(result.InventoryItems)
+    result.TotalReceived = len(result.ReceivedItems)
 
-	// Cache result
-	s.cache.SetWithTTL(cacheKey, result, 10*time.Minute)
+    // Cache result
+    s.cache.SetWithTTL(cacheKey, result, 10*time.Minute)
 
-	return result, nil
+    return result, nil
 }
 
 // Search suggestions and autocomplete
@@ -689,7 +696,8 @@ func (s *searchService) buildReceivedFilters(query string, filters map[string]in
 
 	if status, ok := filters["status"]; ok {
 		if s, ok := status.(string); ok {
-			repoFilters.Status = &s
+			statusValue := s
+			repoFilters.Status = statusValue 
 		}
 	}
 

@@ -79,21 +79,16 @@ func (s *receivedService) GetAll(ctx context.Context, filters map[string]interfa
 func (s *receivedService) GetByID(ctx context.Context, id int) (*models.ReceivedItem, error) {
 	cacheKey := fmt.Sprintf("received:id:%d", id)
 	
-	// Try cache first
 	if cached, exists := s.cache.Get(cacheKey); exists {
 		if item, ok := cached.(*models.ReceivedItem); ok {
 			return item, nil
 		}
 	}
 
-	// Get from repository
 	item, err := s.receivedRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get received item %d: %w", id, err)
 	}
-
-	// Set current state
-	item.CurrentState = item.GetCurrentState()
 
 	// Cache for 5 minutes
 	s.cache.SetWithTTL(cacheKey, item, 5*time.Minute)
@@ -102,44 +97,34 @@ func (s *receivedService) GetByID(ctx context.Context, id int) (*models.Received
 }
 
 func (s *receivedService) Create(ctx context.Context, req *validation.ReceivedValidation) (*models.ReceivedItem, error) {
-	// Validate the request
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
-	// Verify customer exists
 	customer, err := s.customerRepo.GetByID(ctx, req.CustomerID)
 	if err != nil {
 		return nil, fmt.Errorf("customer %d not found: %w", req.CustomerID, err)
 	}
 
-	// Convert to model
 	item := req.ToReceivedModel()
-	item.Customer = customer.Customer // Use full customer name
+	item.Customer = customer.Customer
 	item.DateReceived = timePtr(time.Now())
 	item.CreatedAt = time.Now()
 
-	// Create in repository
 	if err := s.receivedRepo.Create(ctx, item); err != nil {
 		return nil, fmt.Errorf("failed to create received item: %w", err)
 	}
 
-	// Set current state
-	item.CurrentState = item.GetCurrentState()
-
-	// Invalidate relevant caches
 	s.invalidateReceivedCaches()
 
 	return item, nil
 }
 
 func (s *receivedService) Update(ctx context.Context, id int, req *validation.ReceivedValidation) (*models.ReceivedItem, error) {
-	// Validate the request
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
-	// Get existing item
 	existing, err := s.receivedRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("received item %d not found: %w", id, err)
@@ -155,17 +140,12 @@ func (s *receivedService) Update(ctx context.Context, id int, req *validation.Re
 	existing.Well = req.Well
 	existing.Lease = req.Lease
 	existing.Notes = req.Notes
-	existing.UpdatedAt = timePtr(time.Now())
+	existing.WhenUpdated = timePtr(time.Now()) // Use WhenUpdated instead of UpdatedAt
 
-	// Update in repository
 	if err := s.receivedRepo.Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("failed to update received item: %w", err)
 	}
 
-	// Set current state
-	existing.CurrentState = existing.GetCurrentState()
-
-	// Invalidate caches
 	s.cache.Delete(fmt.Sprintf("received:id:%d", id))
 	s.invalidateReceivedCaches()
 
@@ -198,15 +178,12 @@ func (s *receivedService) Delete(ctx context.Context, id int) error {
 func (s *receivedService) GetByWorkOrder(ctx context.Context, workOrder string) (*models.ReceivedItem, error) {
 	cacheKey := fmt.Sprintf("received:work_order:%s", workOrder)
 	
-	// Try cache first
 	if cached, exists := s.cache.Get(cacheKey); exists {
 		if item, ok := cached.(*models.ReceivedItem); ok {
 			return item, nil
 		}
 	}
 
-	// Get from repository (this method needs to be implemented in repository)
-	// For now, we'll filter by work order
 	filters := repository.ReceivedFilters{
 		WorkOrder: &workOrder,
 		Page:      1,
@@ -223,9 +200,6 @@ func (s *receivedService) GetByWorkOrder(ctx context.Context, workOrder string) 
 	}
 
 	item := &items[0]
-	item.CurrentState = item.GetCurrentState()
-
-	// Cache for 5 minutes
 	s.cache.SetWithTTL(cacheKey, item, 5*time.Minute)
 
 	return item, nil
@@ -260,16 +234,17 @@ func (s *receivedService) UpdateStatus(ctx context.Context, id int, status strin
 func (s *receivedService) GetPendingInspection(ctx context.Context) ([]models.ReceivedItem, error) {
 	cacheKey := "received:pending_inspection"
 	
-	// Try cache first
 	if cached, exists := s.cache.Get(cacheKey); exists {
 		if items, ok := cached.([]models.ReceivedItem); ok {
 			return items, nil
 		}
 	}
 
-	// Get items in production state (ready for inspection)
+	// Fix: Status field is string, not *string based on the errors
 	filters := repository.ReceivedFilters{
-		Status: stringPtr("in_production"),
+		Status: "in_production",
+		Page:   1,
+		PerPage: 100,
 	}
 
 	items, _, err := s.receivedRepo.GetFiltered(ctx, filters)
@@ -277,28 +252,51 @@ func (s *receivedService) GetPendingInspection(ctx context.Context) ([]models.Re
 		return nil, fmt.Errorf("failed to get pending inspection items: %w", err)
 	}
 
-	// Set current state for each item
-	for i := range items {
-		items[i].CurrentState = items[i].GetCurrentState()
+	s.cache.SetWithTTL(cacheKey, items, 2*time.Minute)
+	return items, nil
+}
+
+func (s *receivedService) GetOverdueItems(ctx context.Context) ([]models.ReceivedItem, error) {
+	cacheKey := "received:overdue"
+	
+	if cached, exists := s.cache.Get(cacheKey); exists {
+		if items, ok := cached.([]models.ReceivedItem); ok {
+			return items, nil
+		}
 	}
 
-	// Cache for 2 minutes
-	s.cache.SetWithTTL(cacheKey, items, 2*time.Minute)
+	// Fix: Status field is string, not *string
+	filters := repository.ReceivedFilters{
+		Status: "active",
+		Page:   1,
+		PerPage: 100,
+	}
 
-	return items, nil
+	items, _, err := s.receivedRepo.GetFiltered(ctx, filters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get items for overdue check: %w", err)
+	}
+
+	var overdueItems []models.ReceivedItem
+	for _, item := range items {
+		if item.IsOverdue() {
+			overdueItems = append(overdueItems, item)
+		}
+	}
+
+	s.cache.SetWithTTL(cacheKey, overdueItems, 5*time.Minute)
+	return overdueItems, nil
 }
 
 func (s *receivedService) GetByCustomer(ctx context.Context, customerID int, limit, offset int) ([]models.ReceivedItem, int, error) {
 	cacheKey := fmt.Sprintf("received:customer:%d:%d:%d", customerID, limit, offset)
 	
-	// Try cache first
 	if cached, exists := s.cache.Get(cacheKey); exists {
 		if result, ok := cached.(CachedReceivedResult); ok {
 			return result.Items, result.Total, nil
 		}
 	}
 
-	// Get from repository
 	filters := repository.ReceivedFilters{
 		CustomerID: &customerID,
 		Page:       offset/limit + 1,
@@ -315,51 +313,10 @@ func (s *receivedService) GetByCustomer(ctx context.Context, customerID int, lim
 		total = pagination.Total
 	}
 
-	// Set current state for each item
-	for i := range items {
-		items[i].CurrentState = items[i].GetCurrentState()
-	}
-
-	// Cache result
 	result := CachedReceivedResult{Items: items, Total: total}
 	s.cache.SetWithTTL(cacheKey, result, 3*time.Minute)
 
 	return items, total, nil
-}
-
-func (s *receivedService) GetOverdueItems(ctx context.Context) ([]models.ReceivedItem, error) {
-	cacheKey := "received:overdue"
-	
-	// Try cache first
-	if cached, exists := s.cache.Get(cacheKey); exists {
-		if items, ok := cached.([]models.ReceivedItem); ok {
-			return items, nil
-		}
-	}
-
-	// Get all active items
-	filters := repository.ReceivedFilters{
-		Status: stringPtr("active"), // Not completed
-	}
-
-	items, _, err := s.receivedRepo.GetFiltered(ctx, filters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get items for overdue check: %w", err)
-	}
-
-	// Filter overdue items
-	var overdueItems []models.ReceivedItem
-	for _, item := range items {
-		item.CurrentState = item.GetCurrentState()
-		if item.IsOverdue() {
-			overdueItems = append(overdueItems, item)
-		}
-	}
-
-	// Cache for 5 minutes
-	s.cache.SetWithTTL(cacheKey, overdueItems, 5*time.Minute)
-
-	return overdueItems, nil
 }
 
 func (s *receivedService) ValidateWorkOrder(ctx context.Context, workOrder string) error {
@@ -377,8 +334,54 @@ func (s *receivedService) ValidateWorkOrder(ctx context.Context, workOrder strin
 	return nil
 }
 
-// Helper functions
+// Helper methods for workflow state transitions
+func (s *receivedService) AdvanceToProduction(ctx context.Context, workOrder string) error {
+	item, err := s.GetByWorkOrder(ctx, workOrder)
+	if err != nil {
+		return fmt.Errorf("work order not found: %w", err)
+	}
 
+	if item.GetCurrentState() != "received" {
+		return fmt.Errorf("item not ready for production, current state: %s", item.GetCurrentState())
+	}
+
+	// Update the in_production timestamp
+	now := time.Now()
+	item.InProduction = &now
+	item.WhenUpdated = &now
+
+	if err := s.receivedRepo.Update(ctx, item); err != nil {
+		return fmt.Errorf("failed to advance to production: %w", err)
+	}
+
+	s.invalidateReceivedCaches()
+	return nil
+}
+
+func (s *receivedService) MarkComplete(ctx context.Context, workOrder string) error {
+	item, err := s.GetByWorkOrder(ctx, workOrder)
+	if err != nil {
+		return fmt.Errorf("work order not found: %w", err)
+	}
+
+	if item.GetCurrentState() != "inspected" {
+		return fmt.Errorf("item not ready for completion, current state: %s", item.GetCurrentState())
+	}
+
+	// Mark as complete
+	item.Complete = true
+	now := time.Now()
+	item.WhenUpdated = &now
+
+	if err := s.receivedRepo.Update(ctx, item); err != nil {
+		return fmt.Errorf("failed to mark complete: %w", err)
+	}
+
+	s.invalidateReceivedCaches()
+	return nil
+}
+
+// convertToRepoFilters helper function
 func (s *receivedService) convertToRepoFilters(filters map[string]interface{}) repository.ReceivedFilters {
 	repoFilters := repository.ReceivedFilters{
 		Page:    1,
@@ -391,9 +394,10 @@ func (s *receivedService) convertToRepoFilters(filters map[string]interface{}) r
 		}
 	}
 
+	// Status appears to be a string field, not *string
 	if status, ok := filters["status"]; ok {
 		if s, ok := status.(string); ok {
-			repoFilters.Status = &s
+			repoFilters.Status = s
 		}
 	}
 
@@ -406,6 +410,18 @@ func (s *receivedService) convertToRepoFilters(filters map[string]interface{}) r
 	if grade, ok := filters["grade"]; ok {
 		if g, ok := grade.(string); ok {
 			repoFilters.Grade = &g
+		}
+	}
+
+	if size, ok := filters["size"]; ok {
+		if s, ok := size.(string); ok {
+			repoFilters.Size = &s
+		}
+	}
+
+	if connection, ok := filters["connection"]; ok {
+		if c, ok := connection.(string); ok {
+			repoFilters.Connection = &c
 		}
 	}
 

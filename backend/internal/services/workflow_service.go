@@ -65,7 +65,12 @@ func (s *WorkflowService) GetDashboardStats(ctx context.Context) (*WorkflowStats
 	}
 
 	// Get recent items for activity and alerts
-	recentItems, _, err := s.repos.Inventory.GetFiltered(ctx, map[string]interface{}{}, 20, 0)
+	recentItemsFilters := repository.InventoryFilters{
+	    Page:    1,
+	    PerPage: 20,
+	}
+	recentItems, _, err := s.repos.Inventory.GetFiltered(ctx, recentItemsFilters)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get recent items: %w", err)
 	}
@@ -213,21 +218,28 @@ func (s *WorkflowService) GetCustomerWorkflow(ctx context.Context, customerID in
 		return nil, fmt.Errorf("failed to get customer: %w", err)
 	}
 
-	// Get customer's items using your existing filtering
-	filters := map[string]interface{}{
-		"customer_id": customerID,
+	customerFilters := repository.InventoryFilters{
+	    CustomerID: &customerID,
+	    Page:       1,
+	    PerPage:    100,
 	}
-	items, total, err := s.repos.Inventory.GetFiltered(ctx, filters, 100, 0) // Get up to 100 items
+	items, pagination, err := s.repos.Inventory.GetFiltered(ctx, customerFilters)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get customer items: %w", err)
+	    return nil, fmt.Errorf("failed to get customer items: %w", err)
+	}
+
+	// Extract total from pagination
+	total := 0
+	if pagination != nil {
+	    total = pagination.Total
 	}
 
 	summary := &CustomerWorkflowSummary{
-		Customer:      *customer,
-		TotalItems:    total,
-		ItemsByStatus: make(map[string]int),
-		ItemsByGrade:  make(map[string]int),
-		Items:         items,
+	    Customer:      *customer,
+	    TotalItems:    total,  // Now total is defined
+	    ItemsByStatus: make(map[string]int),
+	    ItemsByGrade:  make(map[string]int),
+	    Items:         items,
 	}
 
 	// Calculate status and grade distributions

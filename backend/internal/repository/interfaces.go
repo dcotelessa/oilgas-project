@@ -84,6 +84,10 @@ type InventoryFilters struct {
 
 type ReceivedFilters struct {
 	CustomerID *int   `json:"customer_id,omitempty"`
+	WorkOrder      *string `json:"work_order,omitempty"`
+	Grade          *string `json:"grade,omitempty"`
+	Size           *string `json:"size,omitempty"`
+	Connection     *string `json:"connection,omitempty"`
 	Status     string `json:"status,omitempty"`
 	DateFrom   string `json:"date_from,omitempty"`
 	DateTo     string `json:"date_to,omitempty"`
