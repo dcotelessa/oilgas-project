@@ -4,6 +4,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"oilgas-backend/internal/services"
@@ -25,10 +26,10 @@ func (h *AnalyticsHandler) GetDashboardStats(c *gin.Context) {
 		return
 	}
 
-	utils.SuccessResponse(c, http.StatusOK, gin.H{
-		"dashboard": stats,
+	utils.SuccessResponse(c, gin.H{
+		"dashboard":    stats,
 		"generated_at": time.Now().UTC(),
-	})
+	}, "Dashboard stats retrieved successfully")
 }
 
 func (h *AnalyticsHandler) GetCustomerActivity(c *gin.Context) {
@@ -53,11 +54,11 @@ func (h *AnalyticsHandler) GetCustomerActivity(c *gin.Context) {
 		return
 	}
 
-	utils.SuccessResponse(c, http.StatusOK, gin.H{
-		"activity": activity,
+	utils.SuccessResponse(c, gin.H{
+		"activity":    activity,
 		"period_days": days,
 		"customer_id": customerID,
-	})
+	}, "Customer activity retrieved successfully")
 }
 
 func (h *AnalyticsHandler) GetInventoryAnalytics(c *gin.Context) {
@@ -67,9 +68,7 @@ func (h *AnalyticsHandler) GetInventoryAnalytics(c *gin.Context) {
 		return
 	}
 
-	utils.SuccessResponse(c, http.StatusOK, gin.H{
-		"analytics": analytics,
-	})
+	utils.SuccessResponse(c, analytics, "Inventory analytics retrieved successfully")
 }
 
 func (h *AnalyticsHandler) GetGradeDistribution(c *gin.Context) {
@@ -79,9 +78,7 @@ func (h *AnalyticsHandler) GetGradeDistribution(c *gin.Context) {
 		return
 	}
 
-	utils.SuccessResponse(c, http.StatusOK, gin.H{
-		"distribution": distribution,
-	})
+	utils.SuccessResponse(c, distribution, "Grade distribution retrieved successfully")
 }
 
 func (h *AnalyticsHandler) GetLocationUtilization(c *gin.Context) {
@@ -91,7 +88,5 @@ func (h *AnalyticsHandler) GetLocationUtilization(c *gin.Context) {
 		return
 	}
 
-	utils.SuccessResponse(c, http.StatusOK, gin.H{
-		"utilization": utilization,
-	})
+	utils.SuccessResponse(c, utilization, "Location utilization retrieved successfully")
 }
