@@ -1,6 +1,5 @@
 # Integration Test Makefile
 # Run from: backend/test/integration/
-
 .PHONY: test-integration test-integration-verbose test-integration-coverage test-integration-race test-integration-all
 
 # Basic integration tests (no migrator needed!)
@@ -49,10 +48,32 @@ test-db-setup: setup-integration
 	done
 	@echo "✅ Test database ready (schema will be created by testutil)"
 
+# ADDED: Reset test database (clean slate)
+test-db-reset: setup-integration
+	@echo "🔄 Resetting test database..."
+	docker-compose -f docker-compose.test.yml down -v
+	docker-compose -f docker-compose.test.yml up -d postgres-test
+	@echo "⏳ Waiting for database to be ready..."
+	@until docker exec oilgas-postgres-test pg_isready -U postgres >/dev/null 2>&1; do \
+		echo "Waiting for database..."; \
+		sleep 2; \
+	done
+	@echo "✅ Test database reset complete"
+
+# ADDED: Clean test database without recreating container
+test-db-clean:
+	@echo "🧹 Cleaning test database..."
+	@docker exec oilgas-postgres-test psql -U postgres -d oilgas_inventory_test -c "DROP SCHEMA IF EXISTS store CASCADE;" 2>/dev/null || echo "Schema didn't exist"
+	@echo "✅ Test database cleaned"
+
 # Teardown test database  
 test-db-teardown:
 	@echo "Tearing down test database..."
 	docker-compose -f docker-compose.test.yml down -v
+
+# ADDED: Fresh start - reset DB and run tests
+test-fresh: test-db-reset test-integration
+	@echo "✅ Fresh test run complete"
 
 # Full integration test cycle
 test-integration-full: test-db-setup test-integration-all test-db-teardown
@@ -79,6 +100,14 @@ debug-db:
 	@docker-compose -f docker-compose.test.yml ps
 	@echo "\nDatabase connection test:"
 	@docker exec oilgas-postgres-test psql -U postgres -d oilgas_inventory_test -c "SELECT 'Connection successful!' as status;" 2>/dev/null || echo "❌ Connection failed"
+
+# ADDED: Check database schema status
+debug-schema:
+	@echo "🔍 Debug database schema..."
+	@echo "Tables in store schema:"
+	@docker exec oilgas-postgres-test psql -U postgres -d oilgas_inventory_test -c "\dt store.*" 2>/dev/null || echo "❌ No store schema found"
+	@echo "\nCustomers table structure:"
+	@docker exec oilgas-postgres-test psql -U postgres -d oilgas_inventory_test -c "\d store.customers" 2>/dev/null || echo "❌ No customers table found"
 
 test-connection:
 	@echo "🔌 Testing database connection..."

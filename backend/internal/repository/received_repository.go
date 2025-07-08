@@ -311,25 +311,59 @@ func (r *receivedRepository) GetByWorkOrder(ctx context.Context, workOrder strin
 	query := `
 		SELECT id, work_order, customer_id, customer, joints, rack, size_id, size, weight, grade, connection,
 		       ctd, w_string, well, lease, ordered_by, notes, customer_po, date_received, background,
-		       norm, services, bill_to_id, entered_by, when_entered, when_updated, trucking, trailer,
-		       in_production, inspected_date, created_at
+		       norm, services, bill_to_id, entered_by, when_entered, trucking, trailer,
+		       in_production, inspected_date, threading_date, straighten_required, excess_material,
+		       complete, inspected_by, updated_by, when_updated, deleted, created_at
 		FROM store.received 
 		WHERE work_order = $1 AND deleted = false
 	`
 	
 	item := &models.ReceivedItem{}
 	err := r.db.QueryRow(ctx, query, workOrder).Scan(
-		&item.ID, &item.WorkOrder, &item.CustomerID, &item.Customer,
-		&item.Joints, &item.Rack, &item.SizeID, &item.Size, &item.Weight,
-		&item.Grade, &item.Connection, &item.CTD, &item.WString,
-		&item.Well, &item.Lease, &item.OrderedBy, &item.Notes,
-		&item.CustomerPO, &item.DateReceived, &item.Background,
-		&item.Norm, &item.Services, &item.BillToID, &item.EnteredBy,
-		&item.WhenEntered, &item.WhenUpdated, &item.Trucking, &item.Trailer,
-		&item.InProduction, &item.InspectedDate, &item.CreatedAt,
+		&item.ID,                 // 1
+		&item.WorkOrder,          // 2
+		&item.CustomerID,         // 3
+		&item.Customer,           // 4
+		&item.Joints,             // 5
+		&item.Rack,               // 6
+		&item.SizeID,             // 7
+		&item.Size,               // 8
+		&item.Weight,             // 9
+		&item.Grade,              // 10
+		&item.Connection,         // 11
+		&item.CTD,                // 12
+		&item.WString,            // 13
+		&item.Well,               // 14
+		&item.Lease,              // 15
+		&item.OrderedBy,          // 16
+		&item.Notes,              // 17
+		&item.CustomerPO,         // 18
+		&item.DateReceived,       // 19
+		&item.Background,         // 20
+		&item.Norm,               // 21
+		&item.Services,           // 22
+		&item.BillToID,           // 23
+		&item.EnteredBy,          // 24
+		&item.WhenEntered,        // 25
+		&item.Trucking,           // 26
+		&item.Trailer,            // 27
+		&item.InProduction,       // 28
+		&item.InspectedDate,      // 29
+		&item.ThreadingDate,      // 30
+		&item.StraightenRequired, // 31
+		&item.ExcessMaterial,     // 32
+		&item.Complete,           // 33
+		&item.InspectedBy,        // 34
+		&item.UpdatedBy,          // 35
+		&item.WhenUpdated,        // 36
+		&item.Deleted,            // 37
+		&item.CreatedAt,          // 38
 	)
 	
 	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("work order %s not found", workOrder)
+		}
 		return nil, fmt.Errorf("failed to get received item by work order: %w", err)
 	}
 	

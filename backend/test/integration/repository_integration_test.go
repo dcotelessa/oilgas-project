@@ -86,14 +86,14 @@ func TestRepositoryIntegration(t *testing.T) {
 		assert.NotZero(t, received.CustomerID)
 
 		// Read
-		retrieved, err := repos.Received.GetByID(ctx, received.CustomerID)
+		retrieved, err := repos.Received.GetByID(ctx, received.ID)
 		require.NoError(t, err)
 		assert.Equal(t, received.WorkOrder, retrieved.WorkOrder)
 
 		// Get by work order
 		byWorkOrder, err := repos.Received.GetByWorkOrder(ctx, received.WorkOrder)
 		require.NoError(t, err)
-		assert.Equal(t, received.CustomerID, byWorkOrder.CustomerID)
+		assert.Equal(t, received.ID, byWorkOrder.ID)
 
 		// Update status
 		err = repos.Received.UpdateStatus(ctx, received.ID, "in_production", "Moving to production")
@@ -114,7 +114,7 @@ func TestRepositoryIntegration(t *testing.T) {
 		}
 
 		// Delete
-		err = repos.Received.Delete(ctx, received.CustomerID)
+		err = repos.Received.Delete(ctx, received.ID)
 		require.NoError(t, err)
 	})
 
@@ -122,8 +122,8 @@ func TestRepositoryIntegration(t *testing.T) {
 		// Get all grades
 		grades, err := repos.Grade.GetAll(ctx)
 		require.NoError(t, err)
-		assert.Contains(t, grades, "J55")
-		assert.Contains(t, grades, "L80")
+		assert.Contains(t, grades, models.Grade{Grade: "J55"})
+		assert.Contains(t, grades, models.Grade{Grade: "L80"})
 
 		// Create new grade
 		testGrade := &models.Grade{
@@ -135,7 +135,7 @@ func TestRepositoryIntegration(t *testing.T) {
 		// Verify it exists
 		updatedGrades, err := repos.Grade.GetAll(ctx)
 		require.NoError(t, err)
-		assert.Contains(t, updatedGrades, "TEST123")
+		assert.Contains(t, updatedGrades, models.Grade{Grade: "TEST123"})
 
 		// Check if in use (should be false)
 		inUse, err := repos.Grade.IsInUse(ctx, "TEST123")

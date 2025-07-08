@@ -45,7 +45,7 @@ func SetupTestDB(t testing.TB) *TestDB {
 		ctx:  context.Background(),
 	}
 	
-	// Run test schema setup
+	// Run test schema setup - MATCHES YOUR MIGRATION EXACTLY
 	db.setupTestSchema(t)
 	
 	return db
@@ -93,7 +93,7 @@ func (db *TestDB) Truncate(t testing.TB) {
 
 // SeedGrades creates standard test grades
 func (db *TestDB) SeedGrades(t testing.TB) {
-	// Use the same grades as in your migration
+	// Use the same grades as in your migration - FIXED TABLE NAME
 	grades := []string{"J55", "JZ55", "K55", "L80", "N80", "P105", "P110", "Q125", "T95", "C90", "C95", "S135"}
 	
 	for _, grade := range grades {
@@ -106,14 +106,14 @@ func (db *TestDB) SeedGrades(t testing.TB) {
 	}
 }
 
-// setupTestSchema creates the essential test schema
+// setupTestSchema creates the COMPLETE test schema - MATCHES YOUR MIGRATIONS EXACTLY
 func (db *TestDB) setupTestSchema(t testing.TB) {
 	schema := `
-		-- Create schema matching 001_initial_schema_clean.sql exactly
+		-- Schema matching migrations: 001_initial_schema + 002_enhanced_indexes + 003_add_customer_fields_to_inspected
 		CREATE SCHEMA IF NOT EXISTS store;
 		SET search_path TO store, public;
 
-		-- Table: customers (matches migration exactly)
+		-- Table: customers (from 001_initial_schema.sql)
 		CREATE TABLE IF NOT EXISTS store.customers (
 			customer_id SERIAL PRIMARY KEY,
 			customer VARCHAR(50),
@@ -149,12 +149,7 @@ func (db *TestDB) setupTestSchema(t testing.TB) {
 			created_at TIMESTAMP DEFAULT NOW()
 		);
 
-		-- Table: grade (matches migration exactly)
-		CREATE TABLE IF NOT EXISTS store.grade (
-			grade VARCHAR(50) PRIMARY KEY
-		);
-
-		-- Table: inventory (matches migration exactly)
+		-- Table: inventory (from 001_initial_schema.sql)
 		CREATE TABLE IF NOT EXISTS store.inventory (
 			id SERIAL PRIMARY KEY,
 			username VARCHAR(50),
@@ -191,7 +186,7 @@ func (db *TestDB) setupTestSchema(t testing.TB) {
 			created_at TIMESTAMP DEFAULT NOW()
 		);
 
-		-- Table: received (matches migration exactly)
+		-- Table: received (from 001_initial_schema.sql)
 		CREATE TABLE IF NOT EXISTS store.received (
 			id SERIAL PRIMARY KEY,
 			work_order VARCHAR(50),
@@ -233,29 +228,7 @@ func (db *TestDB) setupTestSchema(t testing.TB) {
 			created_at TIMESTAMP DEFAULT NOW()
 		);
 
-		-- Table: inspected (matches migration exactly - THIS is the real structure!)
-		CREATE TABLE IF NOT EXISTS store.inspected (
-			id SERIAL PRIMARY KEY,
-			username VARCHAR(50),
-			work_order VARCHAR(50),
-			color VARCHAR(50),
-			joints INTEGER,
-			accept INTEGER,
-			reject INTEGER,
-			pin INTEGER,
-			cplg INTEGER,
-			pc INTEGER,
-			complete BOOLEAN NOT NULL DEFAULT false,
-			rack VARCHAR(50),
-			rep_pin INTEGER,
-			rep_cplg INTEGER,
-			rep_pc INTEGER,
-			deleted BOOLEAN NOT NULL DEFAULT false,
-			cn INTEGER,
-			created_at TIMESTAMP DEFAULT NOW()
-		);
-
-		-- Table: fletcher (matches migration exactly)
+		-- Table: fletcher (from 001_initial_schema.sql)
 		CREATE TABLE IF NOT EXISTS store.fletcher (
 			id SERIAL PRIMARY KEY,
 			username VARCHAR(50),
@@ -291,7 +264,7 @@ func (db *TestDB) setupTestSchema(t testing.TB) {
 			created_at TIMESTAMP DEFAULT NOW()
 		);
 
-		-- Table: bakeout (matches migration exactly)
+		-- Table: bakeout (from 001_initial_schema.sql)
 		CREATE TABLE IF NOT EXISTS store.bakeout (
 			id SERIAL PRIMARY KEY,
 			fletcher VARCHAR(50),
@@ -316,7 +289,46 @@ func (db *TestDB) setupTestSchema(t testing.TB) {
 			created_at TIMESTAMP DEFAULT NOW()
 		);
 
-		-- Table: swgc (matches migration exactly)
+		-- Table: inspected (ENHANCED - from 001_initial_schema.sql + 003_add_customer_fields_to_inspected.sql)
+		CREATE TABLE IF NOT EXISTS store.inspected (
+			id SERIAL PRIMARY KEY,
+			username VARCHAR(50),
+			work_order VARCHAR(50),
+			color VARCHAR(50),
+			joints INTEGER,
+			accept INTEGER,
+			reject INTEGER,
+			pin INTEGER,
+			cplg INTEGER,
+			pc INTEGER,
+			complete BOOLEAN NOT NULL DEFAULT false,
+			rack VARCHAR(50),
+			rep_pin INTEGER,
+			rep_cplg INTEGER,
+			rep_pc INTEGER,
+			deleted BOOLEAN NOT NULL DEFAULT false,
+			cn INTEGER,
+			created_at TIMESTAMP DEFAULT NOW(),
+			-- ADDED BY 003 MIGRATION
+			customer_id INTEGER REFERENCES store.customers(customer_id),
+			customer VARCHAR(50),
+			grade VARCHAR(50),
+			size VARCHAR(50),
+			weight VARCHAR(50),
+			connection VARCHAR(50),
+			inspector VARCHAR(50),
+			inspection_date TIMESTAMP,
+			passed_joints INTEGER DEFAULT 0,
+			failed_joints INTEGER DEFAULT 0,
+			notes TEXT
+		);
+
+		-- Table: grade (from 001_initial_schema.sql)
+		CREATE TABLE IF NOT EXISTS store.grade (
+			grade VARCHAR(50) PRIMARY KEY
+		);
+
+		-- Table: swgc (from 001_initial_schema.sql)
 		CREATE TABLE IF NOT EXISTS store.swgc (
 			size_id INTEGER,
 			customer_id INTEGER REFERENCES store.customers(customer_id),
@@ -328,7 +340,7 @@ func (db *TestDB) setupTestSchema(t testing.TB) {
 			created_at TIMESTAMP DEFAULT NOW()
 		);
 
-		-- Table: temp (matches migration exactly)
+		-- Table: temp (from 001_initial_schema.sql)
 		CREATE TABLE IF NOT EXISTS store.temp (
 			id SERIAL PRIMARY KEY,
 			username VARCHAR(50),
@@ -344,7 +356,7 @@ func (db *TestDB) setupTestSchema(t testing.TB) {
 			created_at TIMESTAMP DEFAULT NOW()
 		);
 
-		-- Table: tempinv (matches migration exactly)
+		-- Table: tempinv (from 001_initial_schema.sql)
 		CREATE TABLE IF NOT EXISTS store.tempinv (
 			id SERIAL PRIMARY KEY,
 			username VARCHAR(50),
@@ -378,13 +390,13 @@ func (db *TestDB) setupTestSchema(t testing.TB) {
 			created_at TIMESTAMP DEFAULT NOW()
 		);
 
-		-- Table: test (matches migration exactly)
+		-- Table: test (from 001_initial_schema.sql)
 		CREATE TABLE IF NOT EXISTS store.test (
 			id SERIAL PRIMARY KEY,
 			test VARCHAR(50)
 		);
 
-		-- Table: users (matches migration exactly)
+		-- Table: users (from 001_initial_schema.sql)
 		CREATE TABLE IF NOT EXISTS store.users (
 			user_id SERIAL PRIMARY KEY,
 			username VARCHAR(12) UNIQUE,
@@ -395,17 +407,23 @@ func (db *TestDB) setupTestSchema(t testing.TB) {
 			created_at TIMESTAMP DEFAULT NOW()
 		);
 
-		-- Table: r_number (matches migration exactly)
+		-- Table: r_number (from 001_initial_schema.sql)
 		CREATE TABLE IF NOT EXISTS store.r_number (
 			r_number INTEGER PRIMARY KEY
 		);
 
-		-- Table: wk_number (matches migration exactly)
+		-- Table: wk_number (from 001_initial_schema.sql)
 		CREATE TABLE IF NOT EXISTS store.wk_number (
 			wk_number INTEGER PRIMARY KEY
 		);
 
-		-- Basic indexes (matches migration)
+		-- Insert standard oil & gas grades (from 001_initial_schema.sql)
+		INSERT INTO store.grade (grade) VALUES 
+		('J55'), ('JZ55'), ('K55'), ('L80'), ('N80'), 
+		('P105'), ('P110'), ('Q125'), ('T95'), ('C90'), ('C95'), ('S135')
+		ON CONFLICT (grade) DO NOTHING;
+
+		-- Basic indexes from 001_initial_schema.sql
 		CREATE INDEX IF NOT EXISTS idx_customers_customer ON store.customers(customer);
 		CREATE INDEX IF NOT EXISTS idx_customers_deleted ON store.customers(deleted) WHERE deleted = false;
 		CREATE INDEX IF NOT EXISTS idx_inventory_customer_id ON store.inventory(customer_id);
@@ -417,6 +435,14 @@ func (db *TestDB) setupTestSchema(t testing.TB) {
 		CREATE INDEX IF NOT EXISTS idx_received_deleted ON store.received(deleted) WHERE deleted = false;
 		CREATE INDEX IF NOT EXISTS idx_fletcher_customer_id ON store.fletcher(customer_id);
 		CREATE INDEX IF NOT EXISTS idx_users_username ON store.users(username);
+
+		-- Additional indexes from 003 migration for inspected table
+		CREATE INDEX IF NOT EXISTS idx_inspected_customer_id ON store.inspected(customer_id);
+		CREATE INDEX IF NOT EXISTS idx_inspected_customer_grade ON store.inspected(customer_id, grade) WHERE customer_id IS NOT NULL;
+		CREATE INDEX IF NOT EXISTS idx_inspected_inspection_date ON store.inspected(inspection_date DESC) WHERE inspection_date IS NOT NULL;
+
+		-- Update statistics
+		ANALYZE;
 	`
 	
 	_, err := db.Pool.Exec(db.ctx, schema)
