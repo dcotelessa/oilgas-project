@@ -237,36 +237,53 @@ func (r *analyticsRepository) GetRecentActivity(ctx context.Context, limit int) 
 }
 
 func (r *analyticsRepository) GetCustomerActivity(ctx context.Context, days int, customerID *int) (*models.CustomerActivity, error) {
-	// Implementation for customer-specific activity analysis
 	activity := &models.CustomerActivity{
 		Days: days,
 	}
 
-	var whereClause string
+	// Calculate cutoff date in Go to avoid PostgreSQL interval complexity
+	cutoffDate := time.Now().AddDate(0, 0, -days)
+
+	var query string
 	var args []interface{}
 	
 	if customerID != nil {
-		whereClause = "AND customer_id = $2"
-		args = []interface{}{days, *customerID}
+		query = `
+			SELECT 
+				COUNT(DISTINCT customer_id) as active_customers,
+				COUNT(*) as total_activities,
+				COALESCE(SUM(joints), 0) as total_joints
+			FROM (
+				SELECT customer_id, joints, date_in as activity_date
+				FROM store.inventory 
+				WHERE deleted = false AND date_in >= $1
+				AND customer_id = $2
+				UNION ALL
+				SELECT customer_id, joints, date_received as activity_date
+				FROM store.received 
+				WHERE deleted = false AND date_received >= $1
+				AND customer_id = $2
+			) activities
+		`
+		args = []interface{}{cutoffDate, *customerID}
 	} else {
-		args = []interface{}{days}
+		query = `
+			SELECT 
+				COUNT(DISTINCT customer_id) as active_customers,
+				COUNT(*) as total_activities,
+				COALESCE(SUM(joints), 0) as total_joints
+			FROM (
+				SELECT customer_id, joints, date_in as activity_date
+				FROM store.inventory 
+				WHERE deleted = false AND date_in >= $1
+				UNION ALL
+				SELECT customer_id, joints, date_received as activity_date
+				FROM store.received 
+				WHERE deleted = false AND date_received >= $1
+			) activities
+		`
+		args = []interface{}{cutoffDate}
 	}
-
-	query := fmt.Sprintf(`
-		SELECT 
-			COUNT(DISTINCT customer_id) as active_customers,
-			COUNT(*) as total_activities,
-			COALESCE(SUM(joints), 0) as total_joints
-		FROM (
-			SELECT customer_id, joints, date_in as activity_date
-			FROM store.inventory 
-			WHERE deleted = false AND date_in >= NOW() - INTERVAL '%d days' %s
-			UNION ALL
-			SELECT customer_id, joints, date_received as activity_date
-			FROM store.received 
-			WHERE deleted = false AND date_received >= NOW() - INTERVAL '%d days' %s
-		) activities
-	`, days, whereClause, days, whereClause)
 
 	err := r.db.QueryRow(ctx, query, args...).Scan(
 		&activity.ActiveCustomers, &activity.TotalActivities, &activity.TotalJoints)

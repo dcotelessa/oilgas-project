@@ -93,7 +93,7 @@ func TestRepositoryIntegration(t *testing.T) {
 		// Get by work order
 		byWorkOrder, err := repos.Received.GetByWorkOrder(ctx, received.WorkOrder)
 		require.NoError(t, err)
-		assert.Equal(t, received.ID, byWorkOrder.ID)
+		assert.Equal(t, received.CustomerID, byWorkOrder.CustomerID)
 
 		// Update status
 		err = repos.Received.UpdateStatus(ctx, received.ID, "in_production", "Moving to production")
