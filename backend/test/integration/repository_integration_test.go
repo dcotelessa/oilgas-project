@@ -165,18 +165,19 @@ func TestRepositoryIntegration(t *testing.T) {
 	})
 
 	t.Run("WorkflowState Repository", func(t *testing.T) {
-		// First create a received item to test workflow on
+		// First create a customer
 		customer := &models.Customer{Customer: "Workflow Test Customer"}
 		err := repos.Customer.Create(ctx, customer)
 		require.NoError(t, err)
 
 		received := &models.ReceivedItem{
-			WorkOrder:  "WO-WORKFLOW-001",
-			CustomerID: customer.CustomerID,
-			Customer:   customer.Customer,
-			Joints:     50,
-			Size:       "7\"",
-			Grade:      "N80",
+			WorkOrder:    "WO-WORKFLOW-001",
+			CustomerID:   customer.CustomerID,
+			Customer:     customer.Customer,
+			Joints:       50,
+			Size:         "7\"",
+			Grade:        "N80",
+			DateReceived: testdata.TimePtr(time.Now()),
 		}
 		err = repos.Received.Create(ctx, received)
 		require.NoError(t, err)
@@ -185,15 +186,22 @@ func TestRepositoryIntegration(t *testing.T) {
 		currentState, err := repos.WorkflowState.GetCurrentState(ctx, received.WorkOrder)
 		require.NoError(t, err)
 		assert.NotNil(t, currentState)
+		assert.Equal(t, models.StateReceived, *currentState) // Use string constant
 
-		// Test state transition
-		newState := models.StateProduction
-		err = repos.WorkflowState.TransitionTo(ctx, received.WorkOrder, newState, "Moving to production")
+		// Test state transition - using string instead of typed constant
+		err = repos.WorkflowState.TransitionTo(ctx, received.WorkOrder, models.StateProduction, "Moving to production")
 		require.NoError(t, err)
 
 		// Verify state changed
 		updatedState, err := repos.WorkflowState.GetCurrentState(ctx, received.WorkOrder)
 		require.NoError(t, err)
-		assert.Equal(t, newState, updatedState)
+		assert.Equal(t, models.StateProduction, *updatedState) // String comparison
+
+		// Test validation
+		err = models.ValidateWorkflowState("invalid_state")
+		assert.Error(t, err)
+		
+		err = models.ValidateWorkflowState(models.StateInventory)
+		assert.NoError(t, err)
 	})
 }

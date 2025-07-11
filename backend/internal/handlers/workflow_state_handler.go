@@ -52,9 +52,9 @@ func (h *WorkflowStateHandler) TransitionTo(c *gin.Context) {
 	}
 
 	var req struct {
-		ToState  string `json:"to_state" binding:"required"`
-		Reason   string `json:"reason,omitempty"`
-		Username string `json:"username" binding:"required"`
+		NewState string `json:"new_state" binding:"required"`
+		Notes    string `json:"notes,omitempty"`
+		User     string `json:"user,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -62,31 +62,11 @@ func (h *WorkflowStateHandler) TransitionTo(c *gin.Context) {
 		return
 	}
 
-	// Use the centralized function from models
-	targetState, err := models.StringToWorkflowState(req.ToState)
+	// SIMPLIFIED: Use the unified TransitionTo method
+	err := h.service.TransitionTo(c.Request.Context(), workOrder, req.NewState, req.Notes)
 	if err != nil {
-		utils.BadRequest(c, "Invalid target state", err)
-		return
-	}
-
-	switch targetState {
-	case models.StateProduction:
-		err = h.service.AdvanceToProduction(c.Request.Context(), workOrder, req.Username)
-	case models.StateInspection:
-		err = h.service.AdvanceToInspection(c.Request.Context(), workOrder, req.Username)
-	case models.StateInventory:
-		err = h.service.AdvanceToInventory(c.Request.Context(), workOrder)
-	case models.StateCompleted:
-		err = h.service.MarkAsComplete(c.Request.Context(), workOrder)
-	default:
-		utils.BadRequest(c, "Unsupported state transition", nil)
-		return
-	}
-
-	if err != nil {
-		if strings.Contains(err.Error(), "invalid transition") || 
-		   strings.Contains(err.Error(), "cannot advance") {
-			utils.BadRequest(c, "Invalid state transition", err)
+		if strings.Contains(err.Error(), "invalid") {
+			utils.ErrorResponse(c, http.StatusBadRequest, "Invalid state transition", err)
 			return
 		}
 		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to transition state", err)
@@ -94,10 +74,10 @@ func (h *WorkflowStateHandler) TransitionTo(c *gin.Context) {
 	}
 
 	utils.SuccessResponse(c, gin.H{
+		"message":    "State transition successful",
 		"work_order": workOrder,
-		"new_state":  req.ToState,
-		"reason":     req.Reason,
-	}, "State transition completed successfully")
+		"new_state":  req.NewState,
+	}, "State transition completed")
 }
 
 func (h *WorkflowStateHandler) GetStateHistory(c *gin.Context) {

@@ -16,25 +16,27 @@ type WorkflowStateService interface {
 	AdvanceToProduction(ctx context.Context, workOrder string, username string) error
 	AdvanceToInspection(ctx context.Context, workOrder string, inspectedBy string) error
 	AdvanceToInventory(ctx context.Context, workOrder string) error
+	AdvanceToShipping(ctx context.Context, workOrder string) error
 	MarkAsComplete(ctx context.Context, workOrder string) error
 
 	// Status and history methods
-	GetCurrentState(ctx context.Context, workOrder string) (models.WorkflowState, error)
+	GetCurrentState(ctx context.Context, workOrder string) (*string, error)
 	GetWorkflowStatus(ctx context.Context, workOrder string) (*models.WorkflowStatus, error)
 	GetStateHistory(ctx context.Context, workOrder string) ([]models.StateChange, error)
 	
 	// Bulk operations
-	GetItemsByState(ctx context.Context, state models.WorkflowState) ([]string, error)
-	GetJobsByState(ctx context.Context, state models.WorkflowState, limit, offset int) ([]models.ReceivedItem, int, error)
+	GetItemsByState(ctx context.Context, state string) ([]string, error)
+	GetJobsByState(ctx context.Context, state string, limit, offset int) ([]models.ReceivedItem, int, error)
 	
 	// Validation and business logic
-	ValidateTransition(ctx context.Context, workOrder string, targetState models.WorkflowState) error
-	CanAdvanceToNextState(ctx context.Context, workOrder string) (bool, []models.WorkflowState, error)
+	ValidateTransition(ctx context.Context, workOrder string, targetState string) error
+	CanAdvanceToNextState(ctx context.Context, workOrder string) (bool, []string, error)
+	TransitionTo(ctx context.Context, workOrder string, state string, reason string) error // Add this method
 	
 	// Analytics and monitoring
 	GetWorkflowMetrics(ctx context.Context) (*WorkflowMetrics, error)
 	GetBottlenecks(ctx context.Context) ([]WorkflowBottleneck, error)
-	GetOverdueItems(ctx context.Context, state models.WorkflowState) ([]models.ReceivedItem, error)
+	GetOverdueItems(ctx context.Context, state string) ([]models.ReceivedItem, error)
 }
 
 type workflowStateService struct {
@@ -76,7 +78,7 @@ func (s *workflowStateService) AdvanceToProduction(ctx context.Context, workOrde
 
 func (s *workflowStateService) AdvanceToInspection(ctx context.Context, workOrder string, inspectedBy string) error {
 	// Validate transition using string
-	if err := s.ValidateTransition(ctx, workOrder, "inspected"); err != nil {
+	if err := s.ValidateTransition(ctx, workOrder, "inspection"); err != nil {
 		return fmt.Errorf("cannot advance to inspection: %w", err)
 	}
 
@@ -100,6 +102,23 @@ func (s *workflowStateService) AdvanceToInventory(ctx context.Context, workOrder
 	// Execute transition
 	if err := s.workflowRepo.AdvanceToInventory(ctx, workOrder); err != nil {
 		return fmt.Errorf("failed to advance to inventory: %w", err)
+	}
+
+	// Invalidate caches
+	s.invalidateWorkflowCaches(workOrder)
+
+	return nil
+}
+
+func (s *workflowStateService) AdvanceToShipping(ctx context.Context, workOrder string) error {
+	// Validate transition
+	if err := s.ValidateTransition(ctx, workOrder, "shipped"); err != nil {
+		return fmt.Errorf("cannot advance to shipping: %w", err)
+	}
+
+	// Execute transition
+	if err := s.workflowRepo.AdvanceToShipping(ctx, workOrder); err != nil {
+		return fmt.Errorf("failed to advance to shipping: %w", err)
 	}
 
 	// Invalidate caches
@@ -241,89 +260,54 @@ func (s *workflowStateService) GetJobsByState(ctx context.Context, state models.
 
 // Validation and business logic
 
-func (s *workflowStateService) ValidateTransition(ctx context.Context, workOrder string, targetState models.WorkflowState) error {
-	// Get current state
-	currentState, err := s.GetCurrentState(ctx, workOrder)
+func (s *workflowStateService) ValidateTransition(ctx context.Context, workOrder string, targetState string) error {
+	// Use existing WorkflowStatus instead of duplicate logic
+	status, err := s.GetWorkflowStatus(ctx, workOrder)
 	if err != nil {
-		return fmt.Errorf("failed to get current state: %w", err)
+		return fmt.Errorf("failed to get workflow status: %w", err)
 	}
-
-	// Define valid transitions using WorkflowState constants
-	validTransitions := map[models.WorkflowState][]models.WorkflowState{
-		models.StateReceived:  {models.StateProduction},
-		models.StateProduction: {models.StateInspection},
-		models.StateInspection: {models.StateInventory, models.StateCompleted},
-		models.StateInventory:  {models.StateCompleted},
-		models.StateCompleted:  {}, // Terminal state
+	
+	// Use WorkflowStatus.IsValidTransition (already exists and works)
+	if !status.IsValidTransition(targetState) {
+		return fmt.Errorf("invalid transition from %s to %s", status.CurrentState, targetState)
 	}
-
-	allowedStates, exists := validTransitions[currentState]
-	if !exists {
-		return fmt.Errorf("invalid current state: %s", currentState)
-	}
-
-	// Check if target state is allowed
-	isValid := false
-	for _, allowed := range allowedStates {
-		if allowed == targetState {
-			isValid = true
-			break
-		}
-	}
-
-	if !isValid {
-		return fmt.Errorf("invalid transition from %s to %s", currentState, targetState)
-	}
-
-	// Additional business logic validations
+	
+	// Keep existing business logic validations
 	switch targetState {
-	case models.StateProduction:
+	case "in_production":
 		if err := s.validateForProduction(ctx, workOrder); err != nil {
 			return fmt.Errorf("production validation failed: %w", err)
 		}
-	case models.StateInspection:
-		if currentState != models.StateProduction {
+	case "inspection":
+		if status.CurrentState != "in_production" {
 			return fmt.Errorf("must complete production before inspection")
 		}
-	case models.StateInventory:
-		if currentState != models.StateInspection {
+	case "inventory":
+		if status.CurrentState != "inspection" {
 			return fmt.Errorf("must complete inspection before moving to inventory")
 		}
-	case models.StateCompleted:
-		if currentState != models.StateInventory {
-			return fmt.Errorf("must be in inventory before marking complete")
+	case "completed":
+		if status.CurrentState != "inventory" && status.CurrentState != "inspection" {
+			return fmt.Errorf("must be in inventory or inspection before marking complete")
 		}
 	}
 
 	return nil
 }
 
-func (s *workflowStateService) CanAdvanceToNextState(ctx context.Context, workOrder string) (bool, []models.WorkflowState, error) {
-	// Get current state
-	currentState, err := s.GetCurrentState(ctx, workOrder)
+func (s *workflowStateService) CanAdvanceToNextState(ctx context.Context, workOrder string) (bool, []string, error) {
+	// Use existing WorkflowStatus instead of duplicate logic
+	status, err := s.GetWorkflowStatus(ctx, workOrder)
 	if err != nil {
-		return false, nil, fmt.Errorf("failed to get current state: %w", err)
+		return false, nil, fmt.Errorf("failed to get workflow status: %w", err)
 	}
-
-	// Define valid transitions
-	validTransitions := map[models.WorkflowState][]models.WorkflowState{
-		models.StateReceived:  {models.StateProduction},
-		models.StateProduction: {models.StateInspection},
-		models.StateInspection: {models.StateInventory, models.StateCompleted},
-		models.StateInventory:  {models.StateCompleted},
-		models.StateCompleted:  {}, // Terminal state
-	}
-
-	nextStates, exists := validTransitions[currentState]
-	if !exists {
-		return false, nil, nil
-	}
-
+	
+	// Use WorkflowStatus.GetNextStates (already exists and works)
+	nextStates := status.GetNextStates()
 	canAdvance := len(nextStates) > 0
-
-	// Additional checks for specific transitions
-	if canAdvance && len(nextStates) > 0 {
-		// Check if any validations would prevent advancement
+	
+	// Additional validation checks
+	if canAdvance {
 		for _, nextState := range nextStates {
 			if err := s.ValidateTransition(ctx, workOrder, nextState); err != nil {
 				canAdvance = false
@@ -333,6 +317,28 @@ func (s *workflowStateService) CanAdvanceToNextState(ctx context.Context, workOr
 	}
 
 	return canAdvance, nextStates, nil
+}
+
+func (s *workflowStateService) TransitionTo(ctx context.Context, workOrder string, state string, reason string) error {
+	// Validate state
+	if err := models.ValidateWorkflowState(state); err != nil {
+		return fmt.Errorf("invalid state: %w", err)
+	}
+	
+	// Validate transition
+	if err := s.ValidateTransition(ctx, workOrder, state); err != nil {
+		return fmt.Errorf("invalid transition: %w", err)
+	}
+	
+	// Execute via repository
+	if err := s.workflowRepo.TransitionTo(ctx, workOrder, state, reason); err != nil {
+		return fmt.Errorf("failed to transition: %w", err)
+	}
+	
+	// Invalidate caches
+	s.invalidateWorkflowCaches(workOrder)
+	
+	return nil
 }
 
 // Analytics and monitoring
@@ -450,7 +456,24 @@ func (s *workflowStateService) GetOverdueItems(ctx context.Context, state models
 // Helper methods
 
 func (s *workflowStateService) validateForProduction(ctx context.Context, workOrder string) error {
-	// Business rule validation for production readiness
+	item, err := s.receivedRepo.GetByWorkOrder(ctx, workOrder)
+	if err != nil {
+		return fmt.Errorf("work order not found: %w", err)
+	}
+
+	if item.Joints <= 0 {
+		return fmt.Errorf("cannot move to production: no joints specified")
+	}
+	if item.Size == "" {
+		return fmt.Errorf("cannot move to production: pipe size not specified")
+	}
+	if item.Grade == "" {
+		return fmt.Errorf("cannot move to production: pipe grade not specified")
+	}
+	if item.InProduction != nil {
+		return fmt.Errorf("work order already in production")
+	}
+
 	return nil
 }
 

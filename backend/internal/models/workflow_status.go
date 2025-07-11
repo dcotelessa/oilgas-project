@@ -3,6 +3,17 @@ package models
 
 import "time"
 
+// workflowTransitions defines all valid state transitions
+// Single source of truth - no duplication
+var workflowTransitions = map[string][]string{
+	StateReceived:    {StateProduction},
+	StateProduction:  {StateInspection},
+	StateInspection:  {StateInventory, StateCompleted},
+	StateInventory:   {StateShipped, StateCompleted},
+	StateShipped:     {StateCompleted},
+	StateCompleted:   {}, // Terminal state
+}
+
 // WorkflowStatus represents the current status of a work order in the workflow
 type WorkflowStatus struct {
 	WorkOrder     string     `json:"work_order"`
@@ -33,8 +44,8 @@ type WorkflowStateTransition struct {
 
 // StateChange represents a workflow state transition  
 type StateChange struct {
-	FromState WorkflowState `json:"from_state"`
-	ToState   WorkflowState `json:"to_state"`
+	FromState string	`json:"from_state"`
+	ToState   string	`json:"to_state"`
 	ChangedBy string        `json:"changed_by"`
 	ChangedAt time.Time     `json:"changed_at"`
 	Notes     string        `json:"notes,omitempty"`
@@ -43,15 +54,7 @@ type StateChange struct {
 
 // IsValidTransition checks if a state transition is allowed
 func (w *WorkflowStatus) IsValidTransition(toState string) bool {
-	validTransitions := map[string][]string{
-		"received":      {"in_production"},
-		"in_production": {"inspected"},
-		"inspected":     {"inventory", "completed"},
-		"inventory":     {"completed"},
-		"completed":     {}, // Terminal state
-	}
-	
-	allowedStates, exists := validTransitions[w.CurrentState]
+	allowedStates, exists := workflowTransitions[w.CurrentState]
 	if !exists {
 		return false
 	}
@@ -67,13 +70,18 @@ func (w *WorkflowStatus) IsValidTransition(toState string) bool {
 
 // GetNextStates returns the possible next states from current state
 func (w *WorkflowStatus) GetNextStates() []string {
-	transitions := map[string][]string{
-		"received":      {"in_production"},
-		"in_production": {"inspected"},
-		"inspected":     {"inventory", "completed"},
-		"inventory":     {"completed"},
-		"completed":     {},
+	if states, exists := workflowTransitions[w.CurrentState]; exists {
+		return states
 	}
-	
-	return transitions[w.CurrentState]
+	return []string{}
+}
+
+// GetAllValidTransitions returns the complete transition map (for debugging/docs)
+func GetAllValidTransitions() map[string][]string {
+	// Return copy to prevent external modification
+	result := make(map[string][]string)
+	for state, transitions := range workflowTransitions {
+		result[state] = append([]string{}, transitions...)
+	}
+	return result
 }

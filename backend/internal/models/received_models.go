@@ -44,14 +44,18 @@ type ReceivedItem struct {
 	InspectedBy       string     `json:"inspected_by" db:"inspected_by"`
 	UpdatedBy         string     `json:"updated_by" db:"updated_by"`
 	WhenUpdated       *time.Time `json:"when_updated" db:"when_updated"`
+	DateOut           *time.Time `json:"date_out" db:"date_out"`
 	Deleted           bool       `json:"deleted" db:"deleted"`
 	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
 }
 
 // GetCurrentState returns the current workflow state
-func (r *ReceivedItem) GetCurrentState() WorkflowState {
+func (r *ReceivedItem) GetCurrentState() string {
 	if r.Complete {
 		return StateCompleted
+	}
+	if r.DateOut != nil {
+		return StateShipped
 	}
 	if r.InspectedDate != nil {
 		return StateInspection
@@ -59,7 +63,10 @@ func (r *ReceivedItem) GetCurrentState() WorkflowState {
 	if r.InProduction != nil {
 		return StateProduction
 	}
-	return StateReceived
+	if r.DateReceived != nil {
+		return StateReceived
+	}
+	return "unknown"
 }
 
 // GetDaysInCurrentState returns how many days in current state
@@ -73,11 +80,16 @@ func (r *ReceivedItem) GetDaysInCurrentState() int {
 		stateStartTime = r.InProduction
 	case StateInspection:
 		stateStartTime = r.InspectedDate
+	case StateInventory:
+		// TODO: Still need inventory table lookup or additional field
+		stateStartTime = r.InspectedDate
+	case StateShipped:
+		stateStartTime = r.DateOut
 	case StateCompleted:
 		if r.WhenUpdated != nil {
 			stateStartTime = r.WhenUpdated
 		} else {
-			stateStartTime = r.InspectedDate
+			stateStartTime = r.DateOut
 		}
 	}
 	
@@ -88,14 +100,67 @@ func (r *ReceivedItem) GetDaysInCurrentState() int {
 	return int(time.Since(*stateStartTime).Hours() / 24)
 }
 
+// GetWorkflowStatus creates a WorkflowStatus object for this received item
+func (r *ReceivedItem) GetWorkflowStatus() *WorkflowStatus {
+	return &WorkflowStatus{
+		WorkOrder:     r.WorkOrder,
+		Customer:      r.Customer,
+		Joints:        r.Joints,
+		Grade:         r.Grade,
+		Size:          r.Size,
+		CurrentState:  r.GetCurrentState(),
+		DateReceived:  r.DateReceived,
+		InProduction:  r.InProduction,
+		InspectedDate: r.InspectedDate,
+		Complete:      r.Complete,
+		DaysInState:   r.GetDaysInCurrentState(),
+	}
+}
+
+// CanTransitionTo checks if item can transition to target state
+func (r *ReceivedItem) CanTransitionTo(targetState string) bool {
+	if r.Deleted {
+		return false
+	}
+	
+	// Use WorkflowStatus validation logic
+	status := r.GetWorkflowStatus()
+	return status.IsValidTransition(targetState)
+}
+
+// GetValidTransitions returns possible next states for this item
+func (r *ReceivedItem) GetValidTransitions() []string {
+	if r.Deleted {
+		return []string{}
+	}
+	
+	status := r.GetWorkflowStatus()
+	return status.GetNextStates()
+}
+
 // IsReadyForProduction returns true if item can be moved to production
 func (r *ReceivedItem) IsReadyForProduction() bool {
-	return r.GetCurrentState() == StateReceived && !r.Deleted
+	return r.CanTransitionTo(StateProduction) && !r.Deleted
 }
 
 // IsReadyForInspection returns true if item can be inspected
 func (r *ReceivedItem) IsReadyForInspection() bool {
-	return r.GetCurrentState() == StateProduction && !r.Deleted
+	return r.CanTransitionTo(StateInspection) && !r.Deleted
+}
+
+// IsReadyForInventory returns true if item can be moved to inventory
+func (r *ReceivedItem) IsReadyForInventory() bool {
+	return r.CanTransitionTo(StateInventory) && !r.Deleted
+}
+
+// IsReadyForShipping returns true if item can be shipped
+func (r *ReceivedItem) IsReadyForShipping() bool {
+	return r.CanTransitionTo(StateShipped) && !r.Deleted
+}
+
+// IsReadyForCompletion returns true if item can be marked complete
+func (r *ReceivedItem) IsReadyForCompletion() bool {
+	return r.CanTransitionTo(StateCompleted) && !r.Deleted
 }
 
 // IsOverdue returns true if item has been in current state too long
@@ -109,6 +174,12 @@ func (r *ReceivedItem) IsOverdue() bool {
 		return days > 7 // Should complete production within 7 days
 	case StateInspection:
 		return days > 2 // Should complete inspection within 2 days
+	case StateInventory:
+		return days > 14 // Should ship within 14 days
+	case StateShipped:
+		return days > 5 // Should complete within 5 days of shipping
+	case StateCompleted:
+		return false // Completed items are never overdue
 	}
 	
 	return false
@@ -165,15 +236,74 @@ func (r *ReceivedItem) CanAdvanceToNextState() bool {
 		return false
 	}
 	
-	switch r.GetCurrentState() {
-	case StateReceived:
-		return true // Can always move to production
-	case StateProduction:
-		return true // Can move to inspection
-	case StateInspection:
-		return true // Can mark as complete
-	}
+	// Use WorkflowStatus logic instead of hard-coded rules
+	status := r.GetWorkflowStatus()
+	nextStates := status.GetNextStates()
 	
-	return false
+	return len(nextStates) > 0
 }
 
+// GetNextAvailableStates returns all possible next states
+func (r *ReceivedItem) GetNextAvailableStates() []string {
+	if r.Deleted {
+		return []string{}
+	}
+	
+	status := r.GetWorkflowStatus()
+	return status.GetNextStates()
+}
+
+// ValidateForTransition validates if item is ready for specific transition
+func (r *ReceivedItem) ValidateForTransition(targetState string) error {
+	if r.Deleted {
+		return fmt.Errorf("cannot transition deleted item")
+	}
+	
+	if !r.CanTransitionTo(targetState) {
+		currentState := r.GetCurrentState()
+		return fmt.Errorf("invalid transition from %s to %s", currentState, targetState)
+	}
+	
+	// Business rule validations
+	switch targetState {
+	case StateProduction:
+		if r.Joints <= 0 {
+			return fmt.Errorf("cannot move to production: no joints specified")
+		}
+		if r.Size == "" {
+			return fmt.Errorf("cannot move to production: pipe size not specified")
+		}
+		if r.Grade == "" {
+			return fmt.Errorf("cannot move to production: pipe grade not specified")
+		}
+	case StateInspection:
+		if r.InProduction == nil {
+			return fmt.Errorf("cannot move to inspection: item not in production")
+		}
+	case StateInventory:
+		if r.InspectedDate == nil {
+			return fmt.Errorf("cannot move to inventory: item not inspected")
+		}
+	case StateShipped:
+		// Would need to check inventory status
+		// For now, just check inspection is complete
+		if r.InspectedDate == nil {
+			return fmt.Errorf("cannot ship: item not inspected")
+		}
+	}
+	
+	return nil
+}
+
+// GetWorkflowSummary returns a summary of the item's workflow progress
+func (r *ReceivedItem) GetWorkflowSummary() map[string]interface{} {
+	return map[string]interface{}{
+		"current_state":        r.GetCurrentState(),
+		"days_in_state":       r.GetDaysInCurrentState(),
+		"is_overdue":          r.IsOverdue(),
+		"can_advance":         r.CanAdvanceToNextState(),
+		"next_states":         r.GetNextAvailableStates(),
+		"requires_special":    r.RequiresSpecialHandling(),
+		"processing_notes":    r.GetProcessingNotes(),
+	}
+}

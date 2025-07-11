@@ -15,12 +15,13 @@ type WorkflowStateRepository interface {
 	AdvanceToProduction(ctx context.Context, workOrder string, username string) error
 	AdvanceToInspection(ctx context.Context, workOrder string, inspectedBy string) error
 	AdvanceToInventory(ctx context.Context, workOrder string) error
+	AdvanceToShipping(ctx context.Context, workOrder string) error
 	MarkAsComplete(ctx context.Context, workOrder string) error
 	
 	GetWorkflowStatus(ctx context.Context, workOrder string) (*models.WorkflowStatus, error)
-	GetJobsByState(ctx context.Context, state models.WorkflowState, limit, offset int) ([]models.ReceivedItem, int, error)
-	GetCurrentState(ctx context.Context, workOrder string) (models.WorkflowState, error)
-	TransitionTo(ctx context.Context, workOrder string, state models.WorkflowState, reason string) error
+	GetJobsByState(ctx context.Context, state string, limit, offset int) ([]models.ReceivedItem, int, error)
+	GetCurrentState(ctx context.Context, workOrder string) (*string, error)
+	TransitionTo(ctx context.Context, workOrder string, state string, reason string) error
 }
 
 type workflowStateRepository struct {
@@ -156,6 +157,36 @@ func (r *workflowStateRepository) AdvanceToInventory(ctx context.Context, workOr
 	return tx.Commit(ctx)
 }
 
+func (r *workflowStateRepository) AdvanceToShipping(ctx context.Context, workOrder string) error {
+	// Check current state
+	status, err := r.GetWorkflowStatus(ctx, workOrder)
+	if err != nil {
+		return fmt.Errorf("failed to get current status: %w", err)
+	}
+
+	if status.CurrentState != "inventory" {
+		return fmt.Errorf("cannot advance to shipping from state: %s", status.CurrentState)
+	}
+
+	// Update the received table or create shipping record
+	query := `
+		UPDATE store.received 
+		SET date_out = NOW(), updated_by = 'system', when_updated = NOW()
+		WHERE work_order = $1 AND deleted = false
+	`
+
+	result, err := r.db.Exec(ctx, query, workOrder)
+	if err != nil {
+		return fmt.Errorf("failed to advance to shipping: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("work order not found: %s", workOrder)
+	}
+
+	return nil
+}
+
 func (r *workflowStateRepository) MarkAsComplete(ctx context.Context, workOrder string) error {
 	query := `
 		UPDATE store.received 
@@ -187,12 +218,15 @@ func (r *workflowStateRepository) GetWorkflowStatus(ctx context.Context, workOrd
 			r.in_production,
 			r.inspected_date,
 			r.complete,
+			r.date_out,
 			CASE 
-				WHEN i.date_in IS NOT NULL THEN 'inventory'
 				WHEN r.complete = true THEN 'completed'
-				WHEN r.inspected_date IS NOT NULL THEN 'inspected'
+				WHEN r.date_out IS NOT NULL THEN 'shipped'
+				WHEN i.date_in IS NOT NULL THEN 'inventory'
+				WHEN r.inspected_date IS NOT NULL THEN 'inspection'
 				WHEN r.in_production IS NOT NULL THEN 'in_production'
-				ELSE 'received'
+				WHEN r.date_received IS NOT NULL THEN 'received'
+				ELSE 'unknown'
 			END as current_state,
 			i.date_in as inventory_date
 		FROM store.received r
@@ -201,15 +235,15 @@ func (r *workflowStateRepository) GetWorkflowStatus(ctx context.Context, workOrd
 	`
 
 	var status models.WorkflowStatus
+	var dateOut *time.Time
 	err := r.db.QueryRow(ctx, query, workOrder).Scan(
 		&status.WorkOrder, &status.Customer, &status.Joints,
 		&status.Grade, &status.Size, &status.DateReceived,
 		&status.InProduction, &status.InspectedDate, &status.Complete,
-		&status.CurrentState, &status.InventoryDate,
+		&dateOut, &status.CurrentState, &status.InventoryDate,
 	)
-
 	if err != nil {
-		return nil, fmt.Errorf("work order not found: %w", err)
+		return nil, fmt.Errorf("failed to get workflow status: %w", err)
 	}
 
 	// Calculate days in current state
@@ -223,13 +257,17 @@ func (r *workflowStateRepository) GetWorkflowStatus(ctx context.Context, workOrd
 		if status.InProduction != nil {
 			stateStartTime = *status.InProduction
 		}
-	case "inspected":
+	case "inspection": // Changed from "inspected" to "inspection"
 		if status.InspectedDate != nil {
 			stateStartTime = *status.InspectedDate
 		}
 	case "inventory":
 		if status.InventoryDate != nil {
 			stateStartTime = *status.InventoryDate
+		}
+	case "shipped":
+		if dateOut != nil {
+			stateStartTime = *dateOut
 		}
 	}
 
@@ -240,50 +278,55 @@ func (r *workflowStateRepository) GetWorkflowStatus(ctx context.Context, workOrd
 	return &status, nil
 }
 
-func (r *workflowStateRepository) GetJobsByState(ctx context.Context, state models.WorkflowState, limit, offset int) ([]models.ReceivedItem, int, error) {
-	// Convert WorkflowState to appropriate WHERE clause
-	var whereClause string
-	var args []interface{}
+func (r *workflowStateRepository) GetJobsByState(ctx context.Context, state string, limit, offset int) ([]models.ReceivedItem, int, error) {
+	var whereCondition string
 	
 	switch state {
-	case models.StateReceived:
-		whereClause = `WHERE date_received IS NOT NULL AND in_production IS NULL AND deleted = false`
-	case models.StateProduction:
-		whereClause = `WHERE in_production IS NOT NULL AND inspected_date IS NULL AND deleted = false`
-	case models.StateInspection:
-		whereClause = `WHERE inspected_date IS NOT NULL AND complete = false AND deleted = false`
-	case models.StateCompleted:
-		whereClause = `WHERE complete = true AND deleted = false`
-	case models.StateInventory:
-		// Add inventory logic based on your business rules
-		whereClause = `WHERE inspected_date IS NOT NULL AND complete = false AND deleted = false`
+	case "received":
+		whereCondition = "r.in_production IS NULL AND r.date_received IS NOT NULL"
+	case "in_production":
+		whereCondition = "r.in_production IS NOT NULL AND r.inspected_date IS NULL"
+	case "inspection": // Changed from "inspected" to "inspection"
+		whereCondition = "r.inspected_date IS NOT NULL AND NOT EXISTS (SELECT 1 FROM store.inventory i WHERE i.work_order = r.work_order AND i.deleted = false) AND r.complete = false"
+	case "inventory":
+		whereCondition = "EXISTS (SELECT 1 FROM store.inventory i WHERE i.work_order = r.work_order AND i.deleted = false) AND r.date_out IS NULL AND r.complete = false"
+	case "shipped":
+		whereCondition = "r.date_out IS NOT NULL AND r.complete = false"
+	case "completed":
+		whereCondition = "r.complete = true"
 	default:
-		return nil, 0, fmt.Errorf("unsupported state: %v", state)
+		return nil, 0, fmt.Errorf("invalid state: %s", state)
 	}
 
-	// Count query
-	countQuery := `SELECT COUNT(*) FROM store.received ` + whereClause
+	// Count total
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(*) 
+		FROM store.received r 
+		WHERE r.deleted = false AND %s
+	`, whereCondition)
+
 	var total int
-	err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total)
+	err := r.db.QueryRow(ctx, countQuery).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count jobs: %w", err)
 	}
 
-	// Data query with pagination
-	dataQuery := `
-		SELECT id, work_order, customer_id, customer, joints, rack, size_id, size, 
-			   weight, grade, connection, ctd, wstring, well, lease, ordered_by, notes,
-			   customer_po, date_received, background, norm, services, bill_to_id,
-			   entered_by, when_entered, trucking, trailer, in_production, inspected_date,
-			   threading_date, straighten_required, excess_material, complete, inspected_by,
-			   updated_by, when_updated, deleted, created_at
-		FROM store.received ` + whereClause + `
-		ORDER BY created_at DESC
-		LIMIT $` + fmt.Sprintf("%d", len(args)+1) + ` OFFSET $` + fmt.Sprintf("%d", len(args)+2)
+	// Get jobs
+	query := fmt.Sprintf(`
+		SELECT 
+			id, work_order, customer_id, customer, joints, rack, size_id, size, weight, 
+			grade, connection, ctd, w_string, well, lease, ordered_by, notes, customer_po, 
+			date_received, background, norm, services, bill_to_id, entered_by, when_entered, 
+			trucking, trailer, in_production, inspected_date, threading_date, 
+			straighten_required, excess_material, complete, inspected_by, updated_by, 
+			when_updated, deleted, created_at
+		FROM store.received r
+		WHERE r.deleted = false AND %s
+		ORDER BY r.date_received DESC
+		LIMIT $1 OFFSET $2
+	`, whereCondition)
 
-	args = append(args, limit, offset)
-
-	rows, err := r.db.Query(ctx, dataQuery, args...)
+	rows, err := r.db.Query(ctx, query, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get jobs: %w", err)
 	}
@@ -311,42 +354,45 @@ func (r *workflowStateRepository) GetJobsByState(ctx context.Context, state mode
 	return jobs, total, rows.Err()
 }
 
-func (r *workflowStateRepository) TransitionTo(ctx context.Context, workOrder string, state models.WorkflowState, reason string) error {
+func (r *workflowStateRepository) TransitionTo(ctx context.Context, workOrder string, state string, reason string) error {
+	// Validate state string
+	if err := models.ValidateWorkflowState(state); err != nil {
+		return fmt.Errorf("invalid target state: %w", err)
+	}
+	
+	// Get current status for validation
+	status, err := r.GetWorkflowStatus(ctx, workOrder)
+	if err != nil {
+		return fmt.Errorf("failed to get workflow status: %w", err)
+	}
+	
+	// Use existing WorkflowStatus validation
+	if !status.IsValidTransition(state) {
+		return fmt.Errorf("invalid transition from %s to %s", status.CurrentState, state)
+	}
+	
+	// Execute transition based on target state string
 	switch state {
+	case models.StateProduction:
+		return r.AdvanceToProduction(ctx, workOrder, "system")
 	case models.StateInspection:
 		return r.AdvanceToInspection(ctx, workOrder, "system")
-	case models.StateProduction:
-		// Mark as in production
-		query := `UPDATE store.received SET in_production = NOW() WHERE work_order = $1`
-		_, err := r.db.Exec(ctx, query, workOrder)
-		return err
 	case models.StateInventory:
 		return r.AdvanceToInventory(ctx, workOrder)
+	case models.StateShipped:
+		return r.AdvanceToShipping(ctx, workOrder)
+	case models.StateCompleted:
+		return r.MarkAsComplete(ctx, workOrder)
 	default:
-		return fmt.Errorf("unsupported state transition: %v", state)
+		return fmt.Errorf("unsupported state transition: %s", state)
 	}
 }
 
-func (r *workflowStateRepository) GetCurrentState(ctx context.Context, workOrder string) (models.WorkflowState, error) {
-	query := `
-		SELECT date_received, in_production, inspected_date 
-		FROM store.received 
-		WHERE work_order = $1
-	`
-	
-	var dateReceived, inProduction, inspectedDate *time.Time
-	err := r.db.QueryRow(ctx, query, workOrder).Scan(&dateReceived, &inProduction, &inspectedDate)
+func (r *workflowStateRepository) GetCurrentState(ctx context.Context, workOrder string) (*string, error) {
+	status, err := r.GetWorkflowStatus(ctx, workOrder)
 	if err != nil {
-		return "", fmt.Errorf("failed to get workflow state: %w", err)
+		return nil, fmt.Errorf("failed to get workflow status: %w", err)
 	}
 	
-	if inspectedDate != nil {
-		return models.StateInspection, nil
-	} else if inProduction != nil {
-		return models.StateProduction, nil
-	} else if dateReceived != nil {
-		return models.StateReceived, nil
-	}
-	
-	return models.StateReceived, nil // Default to received instead of "unknown"
+	return &status.CurrentState, nil
 }

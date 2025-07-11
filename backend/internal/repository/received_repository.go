@@ -241,38 +241,105 @@ func (r *receivedRepository) GetFiltered(ctx context.Context, filters ReceivedFi
 	return items, pagination, rows.Err()
 }
 
-func (r *receivedRepository) UpdateStatus(ctx context.Context, id int, status models.WorkflowState, notes string) error {
+func (r *receivedRepository) UpdateStatus(ctx context.Context, id int, status string, notes string) error {
+	// Validate the status first
+	if err := models.ValidateWorkflowState(status); err != nil {
+		return fmt.Errorf("invalid status: %w", err)
+	}
+
+	// Get current item to validate transition
+	currentItem, err := r.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to get current item: %w", err)
+	}
+
+	// Validate the transition is allowed
+	if !currentItem.CanTransitionTo(status) {
+		currentState := currentItem.GetCurrentState()
+		return fmt.Errorf("invalid transition from %s to %s", currentState, status)
+	}
+
 	var query string
 	var args []interface{}
 	
 	switch status {
 	case models.StateProduction:
-		query = `UPDATE store.received SET in_production = NOW(), notes = $2, updated_by = 'system', when_updated = NOW() WHERE id = $1`
+		query = `UPDATE store.received 
+				 SET in_production = NOW(), notes = $2, updated_by = 'system', when_updated = NOW() 
+				 WHERE id = $1 AND deleted = false`
 		args = []interface{}{id, notes}
+		
 	case models.StateInspection:
-		query = `UPDATE store.received SET inspected_date = NOW(), notes = $2, updated_by = 'system', when_updated = NOW() WHERE id = $1`
+		query = `UPDATE store.received 
+				 SET inspected_date = NOW(), notes = $2, updated_by = 'system', when_updated = NOW() 
+				 WHERE id = $1 AND deleted = false`
 		args = []interface{}{id, notes}
+		
+	case models.StateInventory:
+		// Mark as ready for inventory (inspection complete)
+		query = `UPDATE store.received 
+				 SET notes = $2, updated_by = 'system', when_updated = NOW() 
+				 WHERE id = $1 AND deleted = false AND inspected_date IS NOT NULL`
+		args = []interface{}{id, notes}
+		
+	case models.StateShipped:
+		// Add shipped date (you might need to add this field to schema)
+		query = `UPDATE store.received 
+				 SET date_out = NOW(), notes = $2, updated_by = 'system', when_updated = NOW() 
+				 WHERE id = $1 AND deleted = false`
+		args = []interface{}{id, notes}
+		
 	case models.StateCompleted:
-		query = `UPDATE store.received SET complete = true, notes = $2, updated_by = 'system', when_updated = NOW() WHERE id = $1`
+		query = `UPDATE store.received 
+				 SET complete = true, notes = $2, updated_by = 'system', when_updated = NOW() 
+				 WHERE id = $1 AND deleted = false`
 		args = []interface{}{id, notes}
+		
 	case models.StateReceived:
-		// Reset to receiving state (clear production/inspection dates)
-		query = `UPDATE store.received SET in_production = NULL, inspected_date = NULL, complete = false, notes = $2, updated_by = 'system', when_updated = NOW() WHERE id = $1`
+		// Reset to receiving state (clear all progression dates)
+		query = `UPDATE store.received 
+				 SET in_production = NULL, inspected_date = NULL, date_out = NULL, complete = false, 
+				     notes = $2, updated_by = 'system', when_updated = NOW() 
+				 WHERE id = $1 AND deleted = false`
 		args = []interface{}{id, notes}
+		
 	default:
-		return fmt.Errorf("unsupported status transition: %v", status)
+		// This should never happen due to ValidateWorkflowState above, but defensive programming
+		return fmt.Errorf("unsupported status transition: %s", status)
 	}
 
 	result, err := r.db.Exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("failed to update status: %w", err)
+		return fmt.Errorf("failed to update status to %s: %w", status, err)
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("received item not found")
+		return fmt.Errorf("received item not found or update conditions not met (id: %d, status: %s)", id, status)
 	}
 
 	return nil
+}
+
+// Alternative: Add a more specific method for workflow transitions
+func (r *receivedRepository) TransitionWorkflowState(ctx context.Context, id int, targetState string, username string, notes string) error {
+	// Validate the state
+	if err := models.ValidateWorkflowState(targetState); err != nil {
+		return fmt.Errorf("invalid target state: %w", err)
+	}
+
+	// Get current item
+	currentItem, err := r.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to get current item: %w", err)
+	}
+
+	// Validate transition using business logic
+	if err := currentItem.ValidateForTransition(targetState); err != nil {
+		return fmt.Errorf("transition validation failed: %w", err)
+	}
+
+	// Use the existing UpdateStatus method but with validated inputs
+	return r.UpdateStatus(ctx, id, targetState, notes)
 }
 
 func (r *receivedRepository) CanDelete(ctx context.Context, id int) (bool, string, error) {
