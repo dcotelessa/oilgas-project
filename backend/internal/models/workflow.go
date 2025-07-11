@@ -1,6 +1,8 @@
 package models
 
 import (
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -8,11 +10,11 @@ import (
 type WorkflowState string
 
 const (
-	StateReceiving  WorkflowState = "RECEIVING"
+	StateReceived  WorkflowState = "RECEIVED"
 	StateProduction WorkflowState = "PRODUCTION"
 	StateInspection WorkflowState = "INSPECTION"
 	StateInventory  WorkflowState = "INVENTORY"
-	StateShipping   WorkflowState = "SHIPPING"
+	StateShipped   WorkflowState = "SHIPPED"
 	StateCompleted  WorkflowState = "COMPLETED"
 )
 
@@ -109,6 +111,25 @@ type Pagination struct {
 	TotalPages int `json:"total_pages"`
 }
 
+//GetWorkflowStateName returns the name of the workflow state
+func (s WorkflowState) GetName() string {
+	switch s {
+	case StateReceived:
+		return "Received"
+	case StateProduction:
+		return "In Production"
+	case StateInspection:
+		return "Inspection"
+	case StateInventory:
+		return "Inventory"
+	case StateShipped:
+		return "Shipped"
+	case StateCompleted:
+		return "Completed"
+	}
+	return "Unknown"
+}
+
 // GetCurrentState determines workflow state based on dates and flags
 func (j *Job) GetCurrentState() WorkflowState {
 	// Completed/Shipped (joints < 0 indicates shipped)
@@ -132,7 +153,7 @@ func (j *Job) GetCurrentState() WorkflowState {
 	}
 	
 	// Default to receiving
-	return StateReceiving
+	return StateReceived
 }
 
 // IsActive returns true if job is not completed/shipped
@@ -178,4 +199,78 @@ func (cn ColorNumber) GetQualityDescription() string {
 	default:
 		return "Unknown Quality"
 	}
+}
+
+// Add these functions to models/workflow.go
+
+// StringToWorkflowState converts a string to WorkflowState with validation
+func StringToWorkflowState(stateStr string) (WorkflowState, error) {
+	switch strings.ToUpper(stateStr) {
+	case "RECEIVING", "RECEIVED":
+		return StateReceived, nil
+	case "PRODUCTION", "IN_PRODUCTION":
+		return StateProduction, nil
+	case "INSPECTION", "INSPECTED":
+		return StateInspection, nil
+	case "INVENTORY":
+		return StateInventory, nil
+	case "SHIPPING", "SHIPPED":
+		return StateShipped, nil
+	case "COMPLETED", "COMPLETE":
+		return StateCompleted, nil
+	default:
+		return "", fmt.Errorf("invalid workflow state: %s", stateStr)
+	}
+}
+
+// String returns the string representation of WorkflowState
+func (w WorkflowState) String() string {
+	return string(w)
+}
+
+// IsValid checks if the WorkflowState is a valid state
+func (w WorkflowState) IsValid() bool {
+	switch w {
+	case StateReceived, StateProduction, StateInspection, StateInventory, StateShipped, StateCompleted:
+		return true
+	default:
+		return false
+	}
+}
+
+// GetAllWorkflowStates returns all valid workflow states
+func GetAllWorkflowStates() []WorkflowState {
+	return []WorkflowState{
+		StateReceived,
+		StateProduction,
+		StateInspection,
+		StateInventory,
+		StateShipped,
+		StateCompleted,
+	}
+}
+
+// GetValidTransitions returns the valid transitions from the current state
+func (w WorkflowState) GetValidTransitions() []WorkflowState {
+	transitions := map[WorkflowState][]WorkflowState{
+		StateReceived:  {StateProduction},
+		StateProduction: {StateInspection},
+		StateInspection: {StateInventory, StateCompleted},
+		StateInventory:  {StateShipped, StateCompleted},
+		StateShipped:   {StateCompleted},
+		StateCompleted:  {}, // Terminal state
+	}
+	
+	return transitions[w]
+}
+
+// CanTransitionTo checks if transition from current state to target state is valid
+func (w WorkflowState) CanTransitionTo(targetState WorkflowState) bool {
+	validTransitions := w.GetValidTransitions()
+	for _, valid := range validTransitions {
+		if valid == targetState {
+			return true
+		}
+	}
+	return false
 }

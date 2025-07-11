@@ -241,22 +241,26 @@ func (r *receivedRepository) GetFiltered(ctx context.Context, filters ReceivedFi
 	return items, pagination, rows.Err()
 }
 
-func (r *receivedRepository) UpdateStatus(ctx context.Context, id int, status string, notes string) error {
+func (r *receivedRepository) UpdateStatus(ctx context.Context, id int, status models.WorkflowState, notes string) error {
 	var query string
 	var args []interface{}
 	
-	switch strings.ToLower(status) {
-	case "in_production":
-		query = `UPDATE store.received SET in_production = NOW(), notes = $2 WHERE id = $1`
+	switch status {
+	case models.StateProduction:
+		query = `UPDATE store.received SET in_production = NOW(), notes = $2, updated_by = 'system', when_updated = NOW() WHERE id = $1`
 		args = []interface{}{id, notes}
-	case "inspected":
-		query = `UPDATE store.received SET inspected_date = NOW(), notes = $2 WHERE id = $1`
+	case models.StateInspection:
+		query = `UPDATE store.received SET inspected_date = NOW(), notes = $2, updated_by = 'system', when_updated = NOW() WHERE id = $1`
 		args = []interface{}{id, notes}
-	case "completed":
-		query = `UPDATE store.received SET complete = true, notes = $2 WHERE id = $1`
+	case models.StateCompleted:
+		query = `UPDATE store.received SET complete = true, notes = $2, updated_by = 'system', when_updated = NOW() WHERE id = $1`
+		args = []interface{}{id, notes}
+	case models.StateReceived:
+		// Reset to receiving state (clear production/inspection dates)
+		query = `UPDATE store.received SET in_production = NULL, inspected_date = NULL, complete = false, notes = $2, updated_by = 'system', when_updated = NOW() WHERE id = $1`
 		args = []interface{}{id, notes}
 	default:
-		return fmt.Errorf("invalid status: %s", status)
+		return fmt.Errorf("unsupported status transition: %v", status)
 	}
 
 	result, err := r.db.Exec(ctx, query, args...)

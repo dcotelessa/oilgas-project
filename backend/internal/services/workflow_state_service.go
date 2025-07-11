@@ -19,22 +19,22 @@ type WorkflowStateService interface {
 	MarkAsComplete(ctx context.Context, workOrder string) error
 
 	// Status and history methods
-	GetCurrentState(ctx context.Context, workOrder string) (*string, error)
+	GetCurrentState(ctx context.Context, workOrder string) (models.WorkflowState, error)
 	GetWorkflowStatus(ctx context.Context, workOrder string) (*models.WorkflowStatus, error)
 	GetStateHistory(ctx context.Context, workOrder string) ([]models.StateChange, error)
 	
 	// Bulk operations
-	GetItemsByState(ctx context.Context, state string) ([]string, error)
-	GetJobsByState(ctx context.Context, state string, limit, offset int) ([]models.ReceivedItem, int, error)
+	GetItemsByState(ctx context.Context, state models.WorkflowState) ([]string, error)
+	GetJobsByState(ctx context.Context, state models.WorkflowState, limit, offset int) ([]models.ReceivedItem, int, error)
 	
 	// Validation and business logic
-	ValidateTransition(ctx context.Context, workOrder string, targetState string) error
-	CanAdvanceToNextState(ctx context.Context, workOrder string) (bool, []string, error)
+	ValidateTransition(ctx context.Context, workOrder string, targetState models.WorkflowState) error
+	CanAdvanceToNextState(ctx context.Context, workOrder string) (bool, []models.WorkflowState, error)
 	
 	// Analytics and monitoring
 	GetWorkflowMetrics(ctx context.Context) (*WorkflowMetrics, error)
 	GetBottlenecks(ctx context.Context) ([]WorkflowBottleneck, error)
-	GetOverdueItems(ctx context.Context, state string) ([]models.ReceivedItem, error)
+	GetOverdueItems(ctx context.Context, state models.WorkflowState) ([]models.ReceivedItem, error)
 }
 
 type workflowStateService struct {
@@ -127,26 +127,22 @@ func (s *workflowStateService) MarkAsComplete(ctx context.Context, workOrder str
 
 // Status and history methods
 
-func (s *workflowStateService) GetCurrentState(ctx context.Context, workOrder string) (*string, error) {
+func (s *workflowStateService) GetCurrentState(ctx context.Context, workOrder string) (models.WorkflowState, error) {
 	cacheKey := fmt.Sprintf("workflow:state:%s", workOrder)
 	
-	// Try cache first
 	if cached, exists := s.cache.Get(cacheKey); exists {
-		if state, ok := cached.(*string); ok {
+		if state, ok := cached.(models.WorkflowState); ok {
 			return state, nil
 		}
 	}
 
-	// Get status from repository
-	status, err := s.workflowRepo.GetWorkflowStatus(ctx, workOrder)
+	state, err := s.workflowRepo.GetCurrentState(ctx, workOrder)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get workflow status: %w", err)
+		return "", fmt.Errorf("failed to get workflow state: %w", err)
 	}
 
-	// Cache for 2 minutes
-	s.cache.SetWithTTL(cacheKey, &status.CurrentState, 2*time.Minute)
-
-	return &status.CurrentState, nil
+	s.cache.SetWithTTL(cacheKey, state, 2*time.Minute)
+	return state, nil
 }
 
 func (s *workflowStateService) GetWorkflowStatus(ctx context.Context, workOrder string) (*models.WorkflowStatus, error) {
@@ -192,7 +188,7 @@ func (s *workflowStateService) GetStateHistory(ctx context.Context, workOrder st
 
 // Bulk operations
 
-func (s *workflowStateService) GetItemsByState(ctx context.Context, state string) ([]string, error) {
+func (s *workflowStateService) GetItemsByState(ctx context.Context, state models.WorkflowState) ([]string, error) {
 	cacheKey := fmt.Sprintf("workflow:items_by_state:%s", state)
 	
 	// Try cache first
@@ -220,7 +216,7 @@ func (s *workflowStateService) GetItemsByState(ctx context.Context, state string
 	return workOrders, nil
 }
 
-func (s *workflowStateService) GetJobsByState(ctx context.Context, state string, limit, offset int) ([]models.ReceivedItem, int, error) {
+func (s *workflowStateService) GetJobsByState(ctx context.Context, state models.WorkflowState, limit, offset int) ([]models.ReceivedItem, int, error) {
 	cacheKey := fmt.Sprintf("workflow:jobs_by_state:%s:%d:%d", state, limit, offset)
 	
 	// Try cache first
@@ -245,25 +241,25 @@ func (s *workflowStateService) GetJobsByState(ctx context.Context, state string,
 
 // Validation and business logic
 
-func (s *workflowStateService) ValidateTransition(ctx context.Context, workOrder string, targetState string) error {
+func (s *workflowStateService) ValidateTransition(ctx context.Context, workOrder string, targetState models.WorkflowState) error {
 	// Get current state
 	currentState, err := s.GetCurrentState(ctx, workOrder)
 	if err != nil {
 		return fmt.Errorf("failed to get current state: %w", err)
 	}
 
-	// Use string comparison
-	validTransitions := map[string][]string{
-		"received":      {"in_production"},
-		"in_production": {"inspected"},
-		"inspected":     {"inventory"},
-		"inventory":     {"completed"},
-		"completed":     {}, // Terminal state
+	// Define valid transitions using WorkflowState constants
+	validTransitions := map[models.WorkflowState][]models.WorkflowState{
+		models.StateReceived:  {models.StateProduction},
+		models.StateProduction: {models.StateInspection},
+		models.StateInspection: {models.StateInventory, models.StateCompleted},
+		models.StateInventory:  {models.StateCompleted},
+		models.StateCompleted:  {}, // Terminal state
 	}
 
-	allowedStates, exists := validTransitions[*currentState]
+	allowedStates, exists := validTransitions[currentState]
 	if !exists {
-		return fmt.Errorf("invalid current state: %s", *currentState)
+		return fmt.Errorf("invalid current state: %s", currentState)
 	}
 
 	// Check if target state is allowed
@@ -276,25 +272,25 @@ func (s *workflowStateService) ValidateTransition(ctx context.Context, workOrder
 	}
 
 	if !isValid {
-		return fmt.Errorf("invalid transition from %s to %s", *currentState, targetState)
+		return fmt.Errorf("invalid transition from %s to %s", currentState, targetState)
 	}
 
 	// Additional business logic validations
 	switch targetState {
-	case "in_production":
+	case models.StateProduction:
 		if err := s.validateForProduction(ctx, workOrder); err != nil {
 			return fmt.Errorf("production validation failed: %w", err)
 		}
-	case "inspected":
-		if *currentState != "in_production" {
+	case models.StateInspection:
+		if currentState != models.StateProduction {
 			return fmt.Errorf("must complete production before inspection")
 		}
-	case "inventory":
-		if *currentState != "inspected" {
+	case models.StateInventory:
+		if currentState != models.StateInspection {
 			return fmt.Errorf("must complete inspection before moving to inventory")
 		}
-	case "completed":
-		if *currentState != "inventory" {
+	case models.StateCompleted:
+		if currentState != models.StateInventory {
 			return fmt.Errorf("must be in inventory before marking complete")
 		}
 	}
@@ -302,7 +298,7 @@ func (s *workflowStateService) ValidateTransition(ctx context.Context, workOrder
 	return nil
 }
 
-func (s *workflowStateService) CanAdvanceToNextState(ctx context.Context, workOrder string) (bool, []string, error) {
+func (s *workflowStateService) CanAdvanceToNextState(ctx context.Context, workOrder string) (bool, []models.WorkflowState, error) {
 	// Get current state
 	currentState, err := s.GetCurrentState(ctx, workOrder)
 	if err != nil {
@@ -310,15 +306,15 @@ func (s *workflowStateService) CanAdvanceToNextState(ctx context.Context, workOr
 	}
 
 	// Define valid transitions
-	validTransitions := map[string][]string{
-		"received":      {"in_production"},
-		"in_production": {"inspected"},
-		"inspected":     {"inventory"},
-		"inventory":     {"completed"},
-		"completed":     {}, // Terminal state
+	validTransitions := map[models.WorkflowState][]models.WorkflowState{
+		models.StateReceived:  {models.StateProduction},
+		models.StateProduction: {models.StateInspection},
+		models.StateInspection: {models.StateInventory, models.StateCompleted},
+		models.StateInventory:  {models.StateCompleted},
+		models.StateCompleted:  {}, // Terminal state
 	}
 
-	nextStates, exists := validTransitions[*currentState]
+	nextStates, exists := validTransitions[currentState]
 	if !exists {
 		return false, nil, nil
 	}
@@ -357,23 +353,23 @@ func (s *workflowStateService) GetWorkflowMetrics(ctx context.Context) (*Workflo
 		LastUpdated:       time.Now(),
 	}
 
-	// Count items in each state
-	states := []string{
-		"received",
-		"in_production", 
-		"inspected",
-		"inventory",
-		"completed",
+	// Count items in each state using WorkflowState constants
+	states := []models.WorkflowState{
+		models.StateReceived,
+		models.StateProduction,
+		models.StateInspection,
+		models.StateInventory,
+		models.StateCompleted,
 	}
 
 	totalItems := 0
 	for _, state := range states {
 		items, err := s.GetItemsByState(ctx, state)
 		if err != nil {
-			metrics.StateDistribution[state] = 0
+			metrics.StateDistribution[string(state)] = 0
 		} else {
 			count := len(items)
-			metrics.StateDistribution[state] = count
+			metrics.StateDistribution[string(state)] = count
 			totalItems += count
 		}
 	}
@@ -403,11 +399,11 @@ func (s *workflowStateService) GetBottlenecks(ctx context.Context) ([]WorkflowBo
 
 	var bottlenecks []WorkflowBottleneck
 
-	// Check each state for potential bottlenecks
-	states := []string{
-		"received",
-		"in_production",
-		"inspected",
+	// Check each state for potential bottlenecks using WorkflowState constants
+	states := []models.WorkflowState{
+		models.StateReceived,
+		models.StateProduction,
+		models.StateInspection,
 	}
 
 	for _, state := range states {
@@ -419,7 +415,7 @@ func (s *workflowStateService) GetBottlenecks(ctx context.Context) ([]WorkflowBo
 		// Consider it a bottleneck if too many items in one state
 		if len(items) > 20 {
 			bottlenecks = append(bottlenecks, WorkflowBottleneck{
-				State:     state,
+				State:     string(state), // Convert to string for JSON
 				ItemCount: len(items),
 				Severity:  s.calculateBottleneckSeverity(len(items)),
 				Message:   fmt.Sprintf("%d items stuck in %s state", len(items), state),
@@ -433,7 +429,7 @@ func (s *workflowStateService) GetBottlenecks(ctx context.Context) ([]WorkflowBo
 	return bottlenecks, nil
 }
 
-func (s *workflowStateService) GetOverdueItems(ctx context.Context, state string) ([]models.ReceivedItem, error) {
+func (s *workflowStateService) GetOverdueItems(ctx context.Context, state models.WorkflowState) ([]models.ReceivedItem, error) {
 	// Get all items in the state
 	jobs, _, err := s.GetJobsByState(ctx, state, 1000, 0)
 	if err != nil {

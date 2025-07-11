@@ -56,7 +56,7 @@ type ReceivedRepository interface {
 	Delete(ctx context.Context, id int) error
 	
 	GetFiltered(ctx context.Context, filters ReceivedFilters) ([]models.ReceivedItem, *models.Pagination, error)
-	UpdateStatus(ctx context.Context, id int, status string, notes string) error
+	UpdateStatus(ctx context.Context, id int, status models.WorkflowState, notes string) error
 	CanDelete(ctx context.Context, id int) (bool, string, error)
 	GetByWorkOrder(ctx context.Context, workOrder string) (*models.ReceivedItem, error)
 }

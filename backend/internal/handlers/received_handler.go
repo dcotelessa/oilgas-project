@@ -2,11 +2,13 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"oilgas-backend/internal/models"
 	"oilgas-backend/internal/services"
 	"oilgas-backend/internal/utils"
 	"oilgas-backend/pkg/validation"
@@ -173,7 +175,8 @@ func (h *ReceivedHandler) GetByWorkOrder(c *gin.Context) {
 }
 
 func (h *ReceivedHandler) UpdateStatus(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
 	if err != nil {
 		utils.BadRequest(c, "Invalid ID", err)
 		return
@@ -189,17 +192,37 @@ func (h *ReceivedHandler) UpdateStatus(c *gin.Context) {
 		return
 	}
 
-	err = h.receivedService.UpdateStatus(c.Request.Context(), id, req.Status, req.Notes)
+	// Use the centralized function from models
+	status, err := models.StringToWorkflowState(req.Status)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			utils.NotFound(c, "Received item")
+		utils.BadRequest(c, "Invalid status", err)
+		return
+	}
+
+	// Use the correct field name: receivedService instead of service
+	err = h.receivedService.UpdateStatus(c.Request.Context(), id, status, req.Notes)
+	if err != nil {
+		if strings.Contains(err.Error(), "invalid transition") || 
+		   strings.Contains(err.Error(), "validation failed") {
+			utils.BadRequest(c, "Invalid status transition", err)
 			return
 		}
 		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to update status", err)
 		return
 	}
 
-	utils.SuccessResponse(c, nil, "Status updated successfully")
+	// Get updated item to return in response
+	updated, err := h.receivedService.GetByID(c.Request.Context(), id)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve updated item", err)
+		return
+	}
+
+	utils.SuccessResponse(c, gin.H{
+		"item":       updated,
+		"new_status": req.Status,
+		"notes":      req.Notes,
+	}, "Status updated successfully")
 }
 
 func (h *ReceivedHandler) GetPendingInspection(c *gin.Context) {
@@ -260,4 +283,73 @@ func getIntQuery(c *gin.Context, key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
+}
+
+func (h *ReceivedHandler) TransitionStatus(c *gin.Context) {
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil {
+		utils.BadRequest(c, "Invalid ID", err)
+		return
+	}
+
+	var req struct {
+		ToState string `json:"to_state" binding:"required"`
+		Notes   string `json:"notes,omitempty"`
+		Reason  string `json:"reason,omitempty"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequest(c, "Invalid request", err)
+		return
+	}
+
+	// Convert string to WorkflowState
+	targetState, err := models.StringToWorkflowState(req.ToState)
+	if err != nil {
+		utils.BadRequest(c, "Invalid target state", err)
+		return
+	}
+
+	// Get current item to show transition
+	current, err := h.receivedService.GetByID(c.Request.Context(), id)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusNotFound, "Item not found", err)
+		return
+	}
+
+	currentState := current.GetCurrentState()
+	
+	// Perform transition
+	notes := req.Notes
+	if req.Reason != "" {
+		notes = fmt.Sprintf("%s (Reason: %s)", notes, req.Reason)
+	}
+
+	err = h.receivedService.UpdateStatus(c.Request.Context(), id, targetState, notes)
+	if err != nil {
+		if strings.Contains(err.Error(), "invalid transition") || 
+		   strings.Contains(err.Error(), "validation failed") {
+			utils.BadRequest(c, "Invalid status transition", err)
+			return
+		}
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to transition status", err)
+		return
+	}
+
+	// Get updated item
+	updated, err := h.receivedService.GetByID(c.Request.Context(), id)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve updated item", err)
+		return
+	}
+
+	utils.SuccessResponse(c, gin.H{
+		"item":          updated,
+		"transition": gin.H{
+			"from":   currentState.String(),
+			"to":     targetState.String(),
+			"notes":  notes,
+		},
+	}, "Status transition completed successfully")
 }

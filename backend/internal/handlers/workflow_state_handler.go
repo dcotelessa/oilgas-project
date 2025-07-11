@@ -3,9 +3,11 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"oilgas-backend/internal/models"
 	"oilgas-backend/internal/services"
 	"oilgas-backend/internal/utils"
 )
@@ -31,14 +33,14 @@ func (h *WorkflowStateHandler) GetCurrentState(c *gin.Context) {
 		return
 	}
 
-	if state == nil {
+	if state == "" {
 		utils.NotFound(c, "Work order")
 		return
 	}
 
 	utils.SuccessResponse(c, gin.H{
 		"work_order": workOrder,
-		"state":      state,
+		"state":      state.String(), // Convert to string for JSON
 	}, "Current state retrieved successfully")
 }
 
@@ -50,9 +52,9 @@ func (h *WorkflowStateHandler) TransitionTo(c *gin.Context) {
 	}
 
 	var req struct {
-		NewState string `json:"new_state" binding:"required"` // Fixed: Use string instead of models.WorkflowState
-		Notes    string `json:"notes,omitempty"`
-		User     string `json:"user,omitempty"`
+		ToState  string `json:"to_state" binding:"required"`
+		Reason   string `json:"reason,omitempty"`
+		Username string `json:"username" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -60,27 +62,31 @@ func (h *WorkflowStateHandler) TransitionTo(c *gin.Context) {
 		return
 	}
 
-	// Fixed: Check the actual service method signature - likely needs different parameters
-	// Based on the service implementation, it might be AdvanceToProduction, AdvanceToInspection, etc.
-	// For now, let's use a generic approach
-	var err error
-	switch req.NewState {
-	case "in_production":
-		err = h.service.AdvanceToProduction(c.Request.Context(), workOrder, req.User)
-	case "inspected":
-		err = h.service.AdvanceToInspection(c.Request.Context(), workOrder, req.User)
-	case "inventory":
+	// Use the centralized function from models
+	targetState, err := models.StringToWorkflowState(req.ToState)
+	if err != nil {
+		utils.BadRequest(c, "Invalid target state", err)
+		return
+	}
+
+	switch targetState {
+	case models.StateProduction:
+		err = h.service.AdvanceToProduction(c.Request.Context(), workOrder, req.Username)
+	case models.StateInspection:
+		err = h.service.AdvanceToInspection(c.Request.Context(), workOrder, req.Username)
+	case models.StateInventory:
 		err = h.service.AdvanceToInventory(c.Request.Context(), workOrder)
-	case "complete":
+	case models.StateCompleted:
 		err = h.service.MarkAsComplete(c.Request.Context(), workOrder)
 	default:
-		utils.BadRequest(c, "Invalid state transition", nil)
+		utils.BadRequest(c, "Unsupported state transition", nil)
 		return
 	}
 
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid transition") {
-			utils.ErrorResponse(c, http.StatusBadRequest, "Invalid state transition", err)
+		if strings.Contains(err.Error(), "invalid transition") || 
+		   strings.Contains(err.Error(), "cannot advance") {
+			utils.BadRequest(c, "Invalid state transition", err)
 			return
 		}
 		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to transition state", err)
@@ -88,10 +94,10 @@ func (h *WorkflowStateHandler) TransitionTo(c *gin.Context) {
 	}
 
 	utils.SuccessResponse(c, gin.H{
-		"message":    "State transition successful",
 		"work_order": workOrder,
-		"new_state":  req.NewState,
-	}, "State transition completed")
+		"new_state":  req.ToState,
+		"reason":     req.Reason,
+	}, "State transition completed successfully")
 }
 
 func (h *WorkflowStateHandler) GetStateHistory(c *gin.Context) {
@@ -121,8 +127,14 @@ func (h *WorkflowStateHandler) GetItemsByState(c *gin.Context) {
 		return
 	}
 
-	// Fixed: Use string directly instead of converting to models.WorkflowState
-	items, err := h.service.GetItemsByState(c.Request.Context(), stateParam)
+	// Use the centralized function from models
+	state, err := models.StringToWorkflowState(stateParam)
+	if err != nil {
+		utils.BadRequest(c, "Invalid state", err)
+		return
+	}
+
+	items, err := h.service.GetItemsByState(c.Request.Context(), state)
 	if err != nil {
 		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get items by state", err)
 		return
@@ -137,8 +149,8 @@ func (h *WorkflowStateHandler) GetItemsByState(c *gin.Context) {
 
 func (h *WorkflowStateHandler) ValidateTransition(c *gin.Context) {
 	var req struct {
-		From string `json:"from" binding:"required"` // Fixed: Use string instead of models.WorkflowState
-		To   string `json:"to" binding:"required"`   // Fixed: Use string instead of models.WorkflowState
+		WorkOrder string `json:"work_order" binding:"required"`
+		ToState   string `json:"to_state" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -146,10 +158,14 @@ func (h *WorkflowStateHandler) ValidateTransition(c *gin.Context) {
 		return
 	}
 
-	// Fixed: Use ValidateTransition with correct parameters
-	// Based on the service interface, this might take workOrder as first param
-	// For now, use a simplified approach - you may need to adjust based on actual service method
-	err := h.service.ValidateTransition(c.Request.Context(), "", req.To) // workOrder might be needed here
+	// Convert string to WorkflowState
+	targetState, err := models.StringToWorkflowState(req.ToState)
+	if err != nil {
+		utils.BadRequest(c, "Invalid target state", err)
+		return
+	}
+
+	err = h.service.ValidateTransition(c.Request.Context(), req.WorkOrder, targetState)
 	if err != nil {
 		utils.SuccessResponse(c, gin.H{
 			"valid": false,
@@ -159,8 +175,53 @@ func (h *WorkflowStateHandler) ValidateTransition(c *gin.Context) {
 	}
 
 	utils.SuccessResponse(c, gin.H{
-		"valid": true,
-		"from":  req.From,
-		"to":    req.To,
+		"valid":      true,
+		"work_order": req.WorkOrder,
+		"to_state":   req.ToState,
 	}, "Transition is valid")
+}
+
+func (h *WorkflowStateHandler) GetJobsByState(c *gin.Context) {
+	stateParam := c.Param("state")
+	if stateParam == "" {
+		utils.BadRequest(c, "State is required", nil)
+		return
+	}
+
+	// Convert string to WorkflowState
+	state, err := models.StringToWorkflowState(stateParam)
+	if err != nil {
+		utils.BadRequest(c, "Invalid state", err)
+		return
+	}
+
+	// Get pagination parameters
+	limit := 50 // default
+	offset := 0 // default
+
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
+			offset = parsedOffset
+		}
+	}
+
+	jobs, total, err := h.service.GetJobsByState(c.Request.Context(), state, limit, offset)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to get jobs by state", err)
+		return
+	}
+
+	utils.SuccessResponse(c, gin.H{
+		"state":  stateParam,
+		"jobs":   jobs,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	}, "Jobs by state retrieved successfully")
 }

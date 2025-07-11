@@ -194,6 +194,6 @@ func TestRepositoryIntegration(t *testing.T) {
 		// Verify state changed
 		updatedState, err := repos.WorkflowState.GetCurrentState(ctx, received.WorkOrder)
 		require.NoError(t, err)
-		assert.Equal(t, newState, *updatedState)
+		assert.Equal(t, newState, updatedState)
 	})
 }

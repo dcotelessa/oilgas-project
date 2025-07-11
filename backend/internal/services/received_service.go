@@ -19,7 +19,7 @@ type ReceivedService interface {
 	Update(ctx context.Context, id int, req *validation.ReceivedValidation) (*models.ReceivedItem, error)
 	Delete(ctx context.Context, id int) error
 	GetByWorkOrder(ctx context.Context, workOrder string) (*models.ReceivedItem, error)
-	UpdateStatus(ctx context.Context, id int, status string, notes string) error
+	UpdateStatus(ctx context.Context, id int, status models.WorkflowState, notes string) error
 	GetPendingInspection(ctx context.Context) ([]models.ReceivedItem, error)
 	GetByCustomer(ctx context.Context, customerID int, limit, offset int) ([]models.ReceivedItem, int, error)
 	GetOverdueItems(ctx context.Context) ([]models.ReceivedItem, error)
@@ -205,9 +205,15 @@ func (s *receivedService) GetByWorkOrder(ctx context.Context, workOrder string) 
 	return item, nil
 }
 
-func (s *receivedService) UpdateStatus(ctx context.Context, id int, status string, notes string) error {
-	// Validate status
-	validStatuses := []string{"received", "in_production", "inspected", "completed"}
+func (s *receivedService) UpdateStatus(ctx context.Context, id int, status models.WorkflowState, notes string) error {
+	// Validate status - ensure it's a valid WorkflowState
+	validStatuses := []models.WorkflowState{
+		models.StateReceived,
+		models.StateProduction,
+		models.StateInspection,
+		models.StateCompleted,
+	}
+	
 	isValid := false
 	for _, validStatus := range validStatuses {
 		if status == validStatus {
@@ -217,6 +223,11 @@ func (s *receivedService) UpdateStatus(ctx context.Context, id int, status strin
 	}
 	if !isValid {
 		return fmt.Errorf("invalid status: %s", status)
+	}
+
+	// Additional business logic validation
+	if err := s.validateStatusTransition(ctx, id, status); err != nil {
+		return fmt.Errorf("status transition validation failed: %w", err)
 	}
 
 	// Update in repository
@@ -231,6 +242,38 @@ func (s *receivedService) UpdateStatus(ctx context.Context, id int, status strin
 	return nil
 }
 
+func (s *receivedService) validateStatusTransition(ctx context.Context, id int, targetStatus models.WorkflowState) error {
+	// Get current item to check current state
+	item, err := s.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to get current item: %w", err)
+	}
+
+	currentState := item.GetCurrentState()
+
+	// Define valid transitions
+	validTransitions := map[models.WorkflowState][]models.WorkflowState{
+		models.StateReceived:  {models.StateProduction},
+		models.StateProduction: {models.StateInspection, models.StateReceived}, // Allow rollback
+		models.StateInspection: {models.StateCompleted, models.StateProduction}, // Allow rollback
+		models.StateCompleted:  {models.StateInspection}, // Allow rollback
+	}
+
+	allowedStates, exists := validTransitions[currentState]
+	if !exists {
+		return fmt.Errorf("no valid transitions from current state: %s", currentState)
+	}
+
+	// Check if target state is allowed
+	for _, allowed := range allowedStates {
+		if allowed == targetStatus {
+			return nil // Valid transition
+		}
+	}
+
+	return fmt.Errorf("invalid transition from %s to %s", currentState, targetStatus)
+}
+
 func (s *receivedService) GetPendingInspection(ctx context.Context) ([]models.ReceivedItem, error) {
 	cacheKey := "received:pending_inspection"
 	
@@ -240,20 +283,25 @@ func (s *receivedService) GetPendingInspection(ctx context.Context) ([]models.Re
 		}
 	}
 
-	// Fix: Status field is string, not *string based on the errors
-	filters := repository.ReceivedFilters{
-		Status: "in_production",
-		Page:   1,
-		PerPage: 100,
-	}
-
-	items, _, err := s.receivedRepo.GetFiltered(ctx, filters)
+	// Get all items and filter by current state
+	allItems, _, err := s.receivedRepo.GetFiltered(ctx, repository.ReceivedFilters{
+		Page:    1,
+		PerPage: 1000, // Get a large batch
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pending inspection items: %w", err)
+		return nil, fmt.Errorf("failed to get items for inspection check: %w", err)
 	}
 
-	s.cache.SetWithTTL(cacheKey, items, 2*time.Minute)
-	return items, nil
+	// Filter items that are in production (ready for inspection)
+	var pendingItems []models.ReceivedItem
+	for _, item := range allItems {
+		if item.GetCurrentState() == models.StateProduction {
+			pendingItems = append(pendingItems, item)
+		}
+	}
+
+	s.cache.SetWithTTL(cacheKey, pendingItems, 2*time.Minute)
+	return pendingItems, nil
 }
 
 func (s *receivedService) GetOverdueItems(ctx context.Context) ([]models.ReceivedItem, error) {
@@ -341,7 +389,7 @@ func (s *receivedService) AdvanceToProduction(ctx context.Context, workOrder str
 		return fmt.Errorf("work order not found: %w", err)
 	}
 
-	if item.GetCurrentState() != "received" {
+	if item.GetCurrentState() != models.StateReceived {
 		return fmt.Errorf("item not ready for production, current state: %s", item.GetCurrentState())
 	}
 
@@ -364,7 +412,7 @@ func (s *receivedService) MarkComplete(ctx context.Context, workOrder string) er
 		return fmt.Errorf("work order not found: %w", err)
 	}
 
-	if item.GetCurrentState() != "inspected" {
+	if item.GetCurrentState() != models.StateInspection {
 		return fmt.Errorf("item not ready for completion, current state: %s", item.GetCurrentState())
 	}
 

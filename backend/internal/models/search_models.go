@@ -220,7 +220,7 @@ func CreateReceivedResult(item ReceivedItem, relevance float64, matchedOn []stri
 		Joints:       item.Joints,
 		Size:         item.Size,
 		Grade:        item.Grade,
-		CurrentState: item.GetCurrentState(),
+		CurrentState: string(item.GetCurrentState()),
 		Well:         item.Well,
 		Lease:        item.Lease,
 		Relevance:    relevance,

@@ -165,13 +165,31 @@ func (s *ServiceIntegrationTestSuite) TestReceivedService() {
 	s.Assert().Equal(received.WorkOrder, items[0].WorkOrder)
 
 	// Test status updates
-	err = s.services.Received.UpdateStatus(s.ctx, received.ID, "in_inspection", "Ready for inspection")
+	err = s.services.Received.UpdateStatus(s.ctx, received.ID, models.StateProduction, "Ready for production")
 	s.Require().NoError(err)
 
 	// Verify status was updated
 	updated, err := s.repos.Received.GetByID(s.ctx, received.ID)
 	s.Require().NoError(err)
 	s.Assert().Equal(received.WorkOrder, updated.WorkOrder)
+	s.Assert().Equal(models.StateProduction, updated.GetCurrentState())
+
+	// Test invalid status transition
+	err = s.services.Received.UpdateStatus(s.ctx, received.ID, models.StateCompleted, "Skip inspection")
+	s.Assert().Error(err)
+	s.Assert().Contains(err.Error(), "invalid transition")
+
+	// Test valid progression: Production -> Inspection -> Completed
+	err = s.services.Received.UpdateStatus(s.ctx, received.ID, models.StateInspection, "Inspection complete")
+	s.Require().NoError(err)
+
+	err = s.services.Received.UpdateStatus(s.ctx, received.ID, models.StateCompleted, "Job complete")
+	s.Require().NoError(err)
+
+	// Verify final state
+	final, err := s.repos.Received.GetByID(s.ctx, received.ID)
+	s.Require().NoError(err)
+	s.Assert().Equal(models.StateCompleted, final.GetCurrentState())
 }
 
 // Test inspection service with quality control (if inspection service exists)

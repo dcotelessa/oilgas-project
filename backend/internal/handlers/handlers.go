@@ -85,17 +85,19 @@ func (h *Handlers) RegisterRoutes(r *gin.RouterGroup) {
 		received.DELETE("/:id", h.Received.DeleteReceived)
 		received.GET("/work-order/:workOrder", h.Received.GetByWorkOrder)
 		received.PUT("/:id/status", h.Received.UpdateStatus)
+		received.POST("/:id/transition", h.Received.TransitionStatus)
 		received.GET("/pending-inspection", h.Received.GetPendingInspection)
 	}
 
 	// Workflow state routes
 	workflow := r.Group("/workflow")
 	{
-		workflow.GET("/:workOrder/state", h.WorkflowState.GetCurrentState)
-		workflow.POST("/:workOrder/transition", h.WorkflowState.TransitionTo)
-		workflow.GET("/:workOrder/history", h.WorkflowState.GetStateHistory)
-		workflow.GET("/state/:state/items", h.WorkflowState.GetItemsByState)
-		workflow.POST("/validate-transition", h.WorkflowState.ValidateTransition)
+	    workflow.GET("/:workOrder/state", h.WorkflowState.GetCurrentState)
+	    workflow.POST("/:workOrder/transition", h.WorkflowState.TransitionTo)
+	    workflow.GET("/:workOrder/history", h.WorkflowState.GetStateHistory)
+	    workflow.GET("/state/:state/items", h.WorkflowState.GetItemsByState)
+	    workflow.GET("/state/:state/jobs", h.WorkflowState.GetJobsByState)
+	    workflow.POST("/validate-transition", h.WorkflowState.ValidateTransition)
 	}
 
 	// Search routes

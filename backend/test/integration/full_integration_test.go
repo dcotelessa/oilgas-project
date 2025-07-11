@@ -104,7 +104,7 @@ func (s *IntegrationTestSuite) TestCompleteWorkflow() {
 	// Step 3: Test workflow state transitions
 	currentState, err := s.repos.WorkflowState.GetCurrentState(s.ctx, received.WorkOrder)
 	s.Require().NoError(err)
-	s.Assert().Equal(string(models.StateReceiving), *currentState)
+	s.Assert().Equal(string(models.StateReceived), currentState)
 
 	// Move to inspection
 	err = s.repos.WorkflowState.TransitionTo(s.ctx, received.WorkOrder, models.StateInspection, "Ready for inspection")

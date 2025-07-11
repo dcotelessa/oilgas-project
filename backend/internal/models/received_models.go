@@ -1,4 +1,4 @@
-// backend/internal/models/received_models.go
+// backend/internal/models/received_go
 package models
 
 import (
@@ -49,17 +49,17 @@ type ReceivedItem struct {
 }
 
 // GetCurrentState returns the current workflow state
-func (r *ReceivedItem) GetCurrentState() string {
+func (r *ReceivedItem) GetCurrentState() WorkflowState {
 	if r.Complete {
-		return "completed"
+		return StateCompleted
 	}
 	if r.InspectedDate != nil {
-		return "inspected"
+		return StateInspection
 	}
 	if r.InProduction != nil {
-		return "in_production"
+		return StateProduction
 	}
-	return "received"
+	return StateReceived
 }
 
 // GetDaysInCurrentState returns how many days in current state
@@ -67,13 +67,13 @@ func (r *ReceivedItem) GetDaysInCurrentState() int {
 	var stateStartTime *time.Time
 	
 	switch r.GetCurrentState() {
-	case "received":
+	case StateReceived:
 		stateStartTime = r.DateReceived
-	case "in_production":
+	case StateProduction:
 		stateStartTime = r.InProduction
-	case "inspected":
+	case StateInspection:
 		stateStartTime = r.InspectedDate
-	case "completed":
+	case StateCompleted:
 		if r.WhenUpdated != nil {
 			stateStartTime = r.WhenUpdated
 		} else {
@@ -90,12 +90,12 @@ func (r *ReceivedItem) GetDaysInCurrentState() int {
 
 // IsReadyForProduction returns true if item can be moved to production
 func (r *ReceivedItem) IsReadyForProduction() bool {
-	return r.GetCurrentState() == "received" && !r.Deleted
+	return r.GetCurrentState() == StateReceived && !r.Deleted
 }
 
 // IsReadyForInspection returns true if item can be inspected
 func (r *ReceivedItem) IsReadyForInspection() bool {
-	return r.GetCurrentState() == "in_production" && !r.Deleted
+	return r.GetCurrentState() == StateProduction && !r.Deleted
 }
 
 // IsOverdue returns true if item has been in current state too long
@@ -103,11 +103,11 @@ func (r *ReceivedItem) IsOverdue() bool {
 	days := r.GetDaysInCurrentState()
 	
 	switch r.GetCurrentState() {
-	case "received":
+	case StateReceived:
 		return days > 3 // Should move to production within 3 days
-	case "in_production":
+	case StateProduction:
 		return days > 7 // Should complete production within 7 days
-	case "inspected":
+	case StateInspection:
 		return days > 2 // Should complete inspection within 2 days
 	}
 	
@@ -166,13 +166,14 @@ func (r *ReceivedItem) CanAdvanceToNextState() bool {
 	}
 	
 	switch r.GetCurrentState() {
-	case "received":
+	case StateReceived:
 		return true // Can always move to production
-	case "in_production":
+	case StateProduction:
 		return true // Can move to inspection
-	case "inspected":
+	case StateInspection:
 		return true // Can mark as complete
 	}
 	
 	return false
 }
+
