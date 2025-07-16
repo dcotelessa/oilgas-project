@@ -1,25 +1,8 @@
-# Backend - Oil & Gas Inventory System
+# Oil & Gas Inventory System - Backend
 
-Go backend using Gin framework with PostgreSQL and in-memory caching.
+Go-based backend API for the Oil & Gas Inventory System.
 
-## Structure
-
-```
-backend/
-├── cmd/server/          # Main application
-├── internal/           # Private packages
-│   ├── handlers/      # HTTP handlers
-│   ├── services/      # Business logic
-│   ├── repository/    # Data access layer
-│   └── models/        # Data models
-├── pkg/               # Public packages
-│   └── cache/        # In-memory cache
-├── migrations/        # Database migrations
-├── seeds/            # Seed data
-└── migrator.go       # Migration tool
-```
-
-## Development
+## Quick Start
 
 ```bash
 # Install dependencies
@@ -31,25 +14,42 @@ go run migrator.go migrate local
 # Seed database
 go run migrator.go seed local
 
-# Start server
+# Start development server
 go run cmd/server/main.go
 ```
 
 ## API Endpoints
 
-- `GET /health` - Health check
-- `GET /api/v1/grades` - List oil & gas grades
-- `GET /api/v1/customers` - List customers
-- `GET /api/v1/inventory` - List inventory
+- **Health**: `GET /health`
+- **Status**: `GET /api/v1/status`
+- **Customers**: `GET /api/v1/customers`
+- **Inventory**: `GET /api/v1/inventory`
+- **Received**: `GET /api/v1/received`
 
-## Cache Configuration
+## Database Operations
 
-The system uses in-memory caching with configurable TTL:
+```bash
+# Show status
+go run migrator.go status local
 
-```go
-cache := cache.New(cache.Config{
-    TTL:             5 * time.Minute,
-    CleanupInterval: 10 * time.Minute,
-    MaxSize:         1000,
-})
+# Reset database (destructive)
+go run migrator.go reset local
 ```
+
+## Structure
+
+```
+backend/
+├── cmd/server/          # Main application
+├── internal/            # Private application code
+│   ├── handlers/        # HTTP handlers
+│   ├── services/        # Business logic
+│   ├── repository/      # Data access
+│   └── models/          # Data models
+├── pkg/                 # Public packages
+├── migrations/          # Database migrations
+├── seeds/               # Database seed data
+└── test/                # Tests
+```
+
+This backend integrates with Phase 1 normalized data and provides a foundation for Phase 2 development.

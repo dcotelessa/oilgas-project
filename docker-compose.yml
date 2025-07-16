@@ -1,33 +1,65 @@
+# Oil & Gas Inventory System - Docker Compose
+# Local development environment for Phase 2
+
+version: '3.8'
+
 services:
+  # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
+    container_name: oilgas-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-oilgas_inventory}
+      POSTGRES_DB: ${POSTGRES_DB:-oilgas_inventory_local}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d
+      - ./database/schema:/docker-entrypoint-initdb.d:ro
     networks:
-      - app-network
+      - oilgas-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-oilgas_inventory_local}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
+  # PgAdmin - Database Administration
   pgadmin:
     image: dpage/pgadmin4:latest
+    container_name: oilgas-pgadmin
+    restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@localhost.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
     ports:
-      - "8080:80"
-    depends_on:
-      - postgres
+      - "${PGADMIN_PORT:-8080}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./database/schema:/var/lib/pgadmin/storage/schema:ro
     networks:
-      - app-network
+      - oilgas-network
+    depends_on:
+      postgres:
+        condition: service_healthy
 
+# Named volumes for data persistence
 volumes:
   postgres_data:
+    driver: local
+    name: oilgas_postgres_data
+  pgadmin_data:
+    driver: local
+    name: oilgas_pgadmin_data
 
+# Custom network for service communication
 networks:
-  app-network:
+  oilgas-network:
     driver: bridge
+    name: oilgas_network
