@@ -727,6 +727,12 @@ backend/
 └── test/                # Tests
 ```
 
+echo "Checking for psql..."
+if ! command -v psql >/dev/null 2>&1; then
+    echo "❌ PostgreSQL client (psql) not found. Please install it first."
+    exit 1
+fi
+
 This backend provides a foundation for Phase 2 development and beyond.
 BACKEND_README_EOF
 
