@@ -1,10 +1,8 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_DB: oilgas_inventory_local
+      POSTGRES_DB: oil_gas_inventory
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres123
     ports:

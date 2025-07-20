@@ -1,118 +1,180 @@
--- Local environment seed data with clean column names
--- FAKE/MOCK DATA ONLY - Safe for development and version control
+-- Local development seed data
+-- Oil & Gas Inventory System
+-- Fixed: Proper foreign key order
 
 SET search_path TO store, public;
 
--- Clear existing data first (in correct order to handle foreign keys)
-TRUNCATE TABLE store.inventory, store.received, store.fletcher, store.bakeout CASCADE;
-TRUNCATE TABLE store.inspected, store.temp, store.tempinv CASCADE;
-TRUNCATE TABLE store.swgc CASCADE;
-TRUNCATE TABLE store.customers CASCADE;
-TRUNCATE TABLE store.users CASCADE;
-TRUNCATE TABLE store.grade CASCADE;
-TRUNCATE TABLE store.r_number, store.wk_number CASCADE;
+-- Clear existing data (development only)
+-- Note: Tables may not exist yet, so we use CASCADE and IF EXISTS
+DROP TABLE IF EXISTS store.received CASCADE;
+DROP TABLE IF EXISTS store.inventory CASCADE;
+DROP TABLE IF EXISTS store.customers CASCADE;
+DROP TABLE IF EXISTS store.sizes CASCADE; 
+DROP TABLE IF EXISTS store.grade CASCADE;
 
--- Insert grade data (reference data - industry standard)
+-- Oil & gas industry standard grades (referenced by inventory)
+CREATE TABLE IF NOT EXISTS store.grade (
+    grade VARCHAR(10) PRIMARY KEY,
+    description TEXT
+);
+
 INSERT INTO store.grade (grade, description) VALUES 
-('J55', 'API Grade J55 - Low carbon steel'),
-('JZ55', 'API Grade JZ55 - Low carbon steel with improved properties'),
-('K55', 'API Grade K55 - Medium carbon steel'),
-('L80', 'API Grade L80 - Heat treated steel'),
-('N80', 'API Grade N80 - Heat treated steel with higher strength'),
-('P105', 'API Grade P105 - High strength steel'),
-('P110', 'API Grade P110 - Very high strength steel'),
-('Q125', 'API Grade Q125 - Ultra high strength steel'),
-('T95', 'API Grade T95 - High strength seamless steel'),
-('C90', 'API Grade C90 - Heat treated steel'),
-('C95', 'API Grade C95 - Heat treated steel with improved properties'),
-('S135', 'API Grade S135 - Super high strength steel')
-ON CONFLICT (grade) DO NOTHING;
+('J55', 'Standard grade steel casing - most common'),
+('JZ55', 'Enhanced J55 grade with improved properties'),
+('L80', 'Higher strength grade for moderate environments'),
+('N80', 'Medium strength grade for standard applications'),
+('P105', 'High performance grade for demanding conditions'),
+('P110', 'Premium performance grade for extreme environments'),
+('Q125', 'Ultra-high strength grade for specialized applications'),
+('C75', 'Carbon steel grade for basic applications'),
+('C95', 'Higher carbon steel grade'),
+('T95', 'Tough grade for harsh environments');
 
--- Insert reference numbers
-INSERT INTO store.r_number (r_number, description) VALUES
-(1001, 'Standard receipt number'),
-(1002, 'Emergency receipt number'),
-(1003, 'Bulk receipt number')
-ON CONFLICT (r_number) DO NOTHING;
+-- Common pipe sizes in oil & gas industry
+CREATE TABLE IF NOT EXISTS store.sizes (
+    size_id SERIAL PRIMARY KEY,
+    size VARCHAR(50) NOT NULL UNIQUE,
+    description TEXT
+);
 
--- Insert work order numbers
-INSERT INTO store.wk_number (wk_number, description) VALUES
-(2001, 'Standard work order'),
-(2002, 'Priority work order'),
-(2003, 'Emergency work order')
-ON CONFLICT (wk_number) DO NOTHING;
+INSERT INTO store.sizes (size, description) VALUES 
+('4 1/2"', '4.5 inch diameter - small casing'),
+('5"', '5 inch diameter - intermediate casing'),
+('5 1/2"', '5.5 inch diameter - common production casing'),
+('7"', '7 inch diameter - intermediate casing'),
+('8 5/8"', '8.625 inch diameter - surface casing'),
+('9 5/8"', '9.625 inch diameter - surface casing'),
+('10 3/4"', '10.75 inch diameter - surface casing'),
+('13 3/8"', '13.375 inch diameter - surface casing'),
+('16"', '16 inch diameter - conductor casing'),
+('18 5/8"', '18.625 inch diameter - conductor casing'),
+('20"', '20 inch diameter - large conductor casing'),
+('24"', '24 inch diameter - extra large conductor'),
+('30"', '30 inch diameter - structural casing');
 
--- Insert FAKE users (development only)
-INSERT INTO store.users (username, password_hash, full_name, email, role) VALUES 
-('demouser', '$2a$10$dummy.hash.for.development.purposes.only', 'Demo User', 'demo@localhost.dev', 'admin'),
-('testuser', '$2a$10$dummy.hash.for.development.purposes.only', 'Test User', 'test@localhost.dev', 'user'),
-('operator1', '$2a$10$dummy.hash.for.development.purposes.only', 'Operator One', 'op1@localhost.dev', 'operator')
-ON CONFLICT (username) DO NOTHING;
+-- Customers table (must come before inventory/received)
+CREATE TABLE IF NOT EXISTS store.customers (
+    customer_id SERIAL PRIMARY KEY,
+    customer VARCHAR(255) NOT NULL,
+    billing_address TEXT,
+    billing_city VARCHAR(100),
+    billing_state VARCHAR(50),
+    billing_zipcode VARCHAR(20),
+    contact VARCHAR(255),
+    phone VARCHAR(50),
+    fax VARCHAR(50),
+    email VARCHAR(255),
+    deleted BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
--- Insert FAKE customers (completely fictional companies)
-INSERT INTO store.customers (
-    customer, billing_address, billing_city, billing_state, billing_zipcode, 
-    contact, phone, email, deleted
-) VALUES 
-('Demo Oil Services LLC', '1234 Fake Street', 'Houston', 'TX', '77001', 'John Demo', '555-0001', 'demo@example.com', false),
-('Test Drilling Co', '5678 Sample Ave', 'Dallas', 'TX', '75001', 'Jane Test', '555-0002', 'test@example.com', false),
-('Mock Energy Corp', '9101 Development Blvd', 'Austin', 'TX', '78701', 'Bob Mock', '555-0003', 'mock@example.com', false),
-('Example Pipe & Supply', '1122 Placeholder Dr', 'San Antonio', 'TX', '78201', 'Alice Example', '555-0004', 'example@test.com', false),
-('Sample Oilfield Services', '3344 Template Rd', 'Fort Worth', 'TX', '76101', 'Charlie Sample', '555-0005', 'sample@demo.com', false),
-('Fictional Tubular Inc', '5566 Mock Lane', 'Midland', 'TX', '79701', 'David Fictional', '555-0006', 'david@fictional.com', false),
-('Demo Casing Solutions', '7788 Test Boulevard', 'Odessa', 'TX', '79761', 'Emma Demo', '555-0007', 'emma@demosolutions.com', false),
-('Sample Energy Partners', '9900 Example Circle', 'Lubbock', 'TX', '79401', 'Frank Sample', '555-0008', 'frank@sampleenergy.com', false);
+-- Sample customers (oil & gas companies) - INSERT FIRST
+INSERT INTO store.customers (customer, billing_address, billing_city, billing_state, billing_zipcode, contact, phone, fax, email) VALUES 
+('Permian Basin Energy', '1234 Oil Field Rd', 'Midland', 'TX', '79701', 'John Smith', '432-555-0101', '432-555-0102', 'operations@permianbasin.com'),
+('Eagle Ford Solutions', '5678 Shale Ave', 'San Antonio', 'TX', '78201', 'Sarah Johnson', '210-555-0201', '210-555-0202', 'drilling@eagleford.com'),
+('Bakken Industries', '9012 Prairie Blvd', 'Williston', 'ND', '58801', 'Mike Wilson', '701-555-0301', '701-555-0302', 'procurement@bakken.com'),
+('Gulf Coast Drilling', '3456 Offshore Dr', 'Houston', 'TX', '77001', 'Lisa Brown', '713-555-0401', '713-555-0402', 'logistics@gulfcoast.com'),
+('Marcellus Gas Co', '7890 Mountain View', 'Pittsburgh', 'PA', '15201', 'Robert Davis', '412-555-0501', '412-555-0502', 'operations@marcellus.com');
 
--- Insert FAKE inventory records (realistic but fake data)
-INSERT INTO store.inventory (
-    username, work_order, r_number, customer_id, customer, joints, rack, 
-    size, weight, grade, connection, ctd, w_string, color, customer_po, 
-    location, deleted, date_in
-) VALUES 
-('demouser', 'WO-DEMO-001', 1001, 1, 'Demo Oil Services LLC', 100, 'A1', '5 1/2"', '20.00', 'J55', 'BTC', false, false, 'Red', 'PO-DEMO-001', 'Yard A', false, NOW() - INTERVAL '30 days'),
-('testuser', 'WO-TEST-001', 1002, 2, 'Test Drilling Co', 75, 'B2', '7"', '26.00', 'L80', 'LTC', true, false, 'Blue', 'PO-TEST-001', 'Yard B', false, NOW() - INTERVAL '25 days'),
-('operator1', 'WO-MOCK-001', 1003, 3, 'Mock Energy Corp', 150, 'C3', '9 5/8"', '40.00', 'N80', 'BTC', false, true, 'Green', 'PO-MOCK-001', 'Yard C', false, NOW() - INTERVAL '20 days'),
-('demouser', 'WO-EXAMPLE-001', 1001, 4, 'Example Pipe & Supply', 50, 'D4', '4 1/2"', '12.75', 'P110', 'PH6', true, true, 'Yellow', 'PO-EX-001', 'Yard D', false, NOW() - INTERVAL '15 days'),
-('testuser', 'WO-SAMPLE-001', 1002, 5, 'Sample Oilfield Services', 200, 'E5', '3 1/2"', '9.50', 'C90', 'EUE', false, false, 'Orange', 'PO-SAMP-001', 'Yard E', false, NOW() - INTERVAL '10 days');
+-- Inventory table (references customers)
+CREATE TABLE IF NOT EXISTS store.inventory (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(100),
+    work_order VARCHAR(100),
+    r_number VARCHAR(100),
+    customer_id INTEGER REFERENCES store.customers(customer_id),
+    customer VARCHAR(255),
+    joints INTEGER,
+    rack VARCHAR(50),
+    size VARCHAR(50),
+    weight DECIMAL(10,2),
+    grade VARCHAR(10) REFERENCES store.grade(grade),
+    connection VARCHAR(100),
+    ctd VARCHAR(100),
+    w_string VARCHAR(100),
+    swgcc VARCHAR(100),
+    color VARCHAR(50),
+    customer_po VARCHAR(100),
+    fletcher VARCHAR(100),
+    date_in DATE,
+    date_out DATE,
+    well_in VARCHAR(255),
+    lease_in VARCHAR(255),
+    well_out VARCHAR(255),
+    lease_out VARCHAR(255),
+    trucking VARCHAR(100),
+    trailer VARCHAR(100),
+    location VARCHAR(100),
+    notes TEXT,
+    pcode VARCHAR(50),
+    cn VARCHAR(50),
+    ordered_by VARCHAR(100),
+    deleted BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
--- Insert FAKE received records (realistic but fake data)
-INSERT INTO store.received (
-    work_order, customer_id, customer, joints, rack, size, weight, grade, 
-    connection, well, lease, ordered_by, customer_po, date_received, 
-    entered_by, when_entered, deleted
-) VALUES 
-('WO-REC-001', 1, 'Demo Oil Services LLC', 80, 'R1', '5 1/2"', '20.00', 'J55', 'BTC', 'Demo Well #1', 'Demo Lease A', 'John Demo', 'PO-REC-001', NOW() - INTERVAL '5 days', 'demouser', NOW() - INTERVAL '5 days', false),
-('WO-REC-002', 2, 'Test Drilling Co', 60, 'R2', '7"', '26.00', 'L80', 'LTC', 'Test Well #2', 'Test Lease B', 'Jane Test', 'PO-REC-002', NOW() - INTERVAL '3 days', 'testuser', NOW() - INTERVAL '3 days', false),
-('WO-REC-003', 3, 'Mock Energy Corp', 120, 'R3', '9 5/8"', '40.00', 'N80', 'BTC', 'Mock Well #3', 'Mock Lease C', 'Bob Mock', 'PO-REC-003', NOW() - INTERVAL '1 day', 'operator1', NOW() - INTERVAL '1 day', false);
+-- Sample inventory data (NOW with valid customer_id references)
+INSERT INTO store.inventory (work_order, customer_id, customer, joints, size, weight, grade, connection, date_in, well_in, lease_in, location, notes) VALUES 
+('WO-2024-001', 1, 'Permian Basin Energy', 100, '5 1/2"', 2500.50, 'L80', 'BTC', '2024-01-15', 'Well-PB-001', 'Lease-PB-A', 'Yard-A', 'Standard production casing'),
+('WO-2024-002', 2, 'Eagle Ford Solutions', 150, '7"', 4200.75, 'P110', 'VAM TOP', '2024-01-16', 'Well-EF-002', 'Lease-EF-B', 'Yard-B', 'High pressure application'),
+('WO-2024-003', 3, 'Bakken Industries', 75, '9 5/8"', 6800.25, 'N80', 'LTC', '2024-01-17', 'Well-BK-003', 'Lease-BK-C', 'Yard-C', 'Surface casing'),
+('WO-2024-004', 4, 'Gulf Coast Drilling', 200, '5 1/2"', 5000.00, 'J55', 'STC', '2024-01-18', 'Well-GC-004', 'Lease-GC-D', 'Yard-A', 'Offshore application');
 
--- Insert some FAKE SWGC combinations
-INSERT INTO store.swgc (customer_id, size, weight, grade, connection, pcode_receive, pcode_inventory) VALUES
-(1, '5 1/2"', '20.00', 'J55', 'BTC', 'RCV001', 'INV001'),
-(2, '7"', '26.00', 'L80', 'LTC', 'RCV002', 'INV002'),
-(3, '9 5/8"', '40.00', 'N80', 'BTC', 'RCV003', 'INV003'),
-(4, '4 1/2"', '12.75', 'P110', 'PH6', 'RCV004', 'INV004'),
-(5, '3 1/2"', '9.50', 'C90', 'EUE', 'RCV005', 'INV005');
+-- Received table (also references customers and sizes)
+CREATE TABLE IF NOT EXISTS store.received (
+    id SERIAL PRIMARY KEY,
+    work_order VARCHAR(100),
+    customer_id INTEGER REFERENCES store.customers(customer_id),
+    customer VARCHAR(255),
+    joints INTEGER,
+    rack VARCHAR(50),
+    size_id INTEGER REFERENCES store.sizes(size_id),
+    size VARCHAR(50),
+    weight DECIMAL(10,2),
+    grade VARCHAR(10) REFERENCES store.grade(grade),
+    connection VARCHAR(100),
+    ctd VARCHAR(100),
+    w_string VARCHAR(100),
+    well VARCHAR(255),
+    lease VARCHAR(255),
+    ordered_by VARCHAR(100),
+    notes TEXT,
+    customer_po VARCHAR(100),
+    date_received DATE,
+    background TEXT,
+    norm VARCHAR(100),
+    services TEXT,
+    bill_to_id INTEGER,
+    entered_by VARCHAR(100),
+    when_entered TIMESTAMP,
+    trucking VARCHAR(100),
+    trailer VARCHAR(100),
+    in_production BOOLEAN DEFAULT FALSE,
+    inspected_date DATE,
+    threading_date DATE,
+    straighten_required BOOLEAN DEFAULT FALSE,
+    excess_material BOOLEAN DEFAULT FALSE,
+    complete BOOLEAN DEFAULT FALSE,
+    inspected_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    when_updated TIMESTAMP,
+    deleted BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
--- Data integrity check
-DO $$
-DECLARE
-    customer_count INTEGER;
-    inventory_count INTEGER;
-    received_count INTEGER;
-    grade_count INTEGER;
-BEGIN
-    SELECT COUNT(*) INTO customer_count FROM store.customers WHERE deleted = false;
-    SELECT COUNT(*) INTO inventory_count FROM store.inventory WHERE deleted = false;
-    SELECT COUNT(*) INTO received_count FROM store.received WHERE deleted = false;
-    SELECT COUNT(*) INTO grade_count FROM store.grade;
-    
-    RAISE NOTICE '📊 Seed Data Summary:';
-    RAISE NOTICE '   Customers: %', customer_count;
-    RAISE NOTICE '   Inventory Items: %', inventory_count;
-    RAISE NOTICE '   Received Items: %', received_count;
-    RAISE NOTICE '   Oil & Gas Grades: %', grade_count;
-END $$;
+-- Sample received data (with valid customer_id and size_id references)
+INSERT INTO store.received (work_order, customer_id, customer, joints, size_id, size, weight, grade, connection, date_received, well, lease, ordered_by, notes, in_production, complete) VALUES 
+('WO-2024-005', 1, 'Permian Basin Energy', 80, 4, '7"', 3200.00, 'L80', 'BTC', '2024-01-20', 'Well-PB-005', 'Lease-PB-E', 'John Smith', 'Expedited order', false, false),
+('WO-2024-006', 5, 'Marcellus Gas Co', 120, 3, '5 1/2"', 3000.00, 'P110', 'VAM TOP', '2024-01-21', 'Well-MG-006', 'Lease-MG-F', 'Robert Davis', 'High pressure specs', false, false),
+('WO-2024-007', 2, 'Eagle Ford Solutions', 90, 5, '8 5/8"', 7200.00, 'N80', 'LTC', '2024-01-22', 'Well-EF-007', 'Lease-EF-G', 'Sarah Johnson', 'Surface casing rush', true, false);
 
--- Update statistics for better query performance
-ANALYZE;
+-- Create indexes for performance
+CREATE INDEX IF NOT EXISTS idx_inventory_customer_id ON store.inventory(customer_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_work_order ON store.inventory(work_order);
+CREATE INDEX IF NOT EXISTS idx_inventory_date_in ON store.inventory(date_in);
+CREATE INDEX IF NOT EXISTS idx_received_customer_id ON store.received(customer_id);
+CREATE INDEX IF NOT EXISTS idx_received_work_order ON store.received(work_order);
+CREATE INDEX IF NOT EXISTS idx_received_date_received ON store.received(date_received);
 
+-- Note: Phase 1 normalized CSV data will be imported later
+-- Run 'make import-clean-data' after Phase 1 completion to import real data

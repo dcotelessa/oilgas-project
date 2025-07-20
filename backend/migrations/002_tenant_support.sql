@@ -74,12 +74,12 @@ UPDATE store.received SET tenant_id = (
 ) WHERE tenant_id IS NULL;
 
 -- Create authenticated_users role if it doesn't exist
-DO $body$
+DO $$ 
 BEGIN
     CREATE ROLE authenticated_users;
 EXCEPTION
     WHEN duplicate_object THEN null;
-END $body$;
+END $$;
 
 -- Enable Row-Level Security
 ALTER TABLE store.customers ENABLE ROW LEVEL SECURITY;
