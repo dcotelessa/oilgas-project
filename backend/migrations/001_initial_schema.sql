@@ -296,7 +296,7 @@ CREATE INDEX IF NOT EXISTS idx_received_deleted ON store.received(deleted);
 CREATE INDEX IF NOT EXISTS idx_received_date_received ON store.received(date_received);
 
 -- Set default search path
-ALTER DATABASE $DATABASE_NAME SET search_path TO store, public;
+ALTER DATABASE oilgas_inventory_local SET search_path TO store, public;
 
 -- Grant permissions (adjust as needed)
 -- GRANT ALL PRIVILEGES ON SCHEMA store TO your_app_user;

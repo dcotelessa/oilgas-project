@@ -27,7 +27,7 @@ mkdir -p backend/{cmd/server,internal/{handlers,services,repository,models},pkg/
 # Create go.mod
 echo "📦 Initializing Go module..."
 cat > backend/go.mod << 'GOMOD_EOF'
-module github.com/your-org/oil-gas-inventory
+module github.com/dcotelessa/oilgas-project
 
 go 1.21
 
@@ -84,15 +84,24 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
 
-	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
+
+type Migration struct {
+	Version    string
+	Name       string
+	SQL        string
+	ExecutedAt *time.Time
+}
 
 type Migrator struct {
 	db  *sql.DB
@@ -153,17 +162,31 @@ func main() {
 }
 
 func loadEnv(env string) error {
+	// Try multiple environment file locations
 	envFiles := []string{
 		".env",
 		".env.local",
 		fmt.Sprintf(".env.%s", env),
+		"../.env",
+		"../.env.local",
+		fmt.Sprintf("../.env.%s", env),
 	}
 
+	loaded := false
 	for _, file := range envFiles {
 		if _, err := os.Stat(file); err == nil {
-			return godotenv.Load(file)
+			if err := godotenv.Load(file); err == nil {
+				log.Printf("Loaded environment from: %s", file)
+				loaded = true
+				break
+			}
 		}
 	}
+
+	if !loaded {
+		log.Printf("Warning: No .env file found, using system environment")
+	}
+
 	return nil
 }
 
@@ -182,6 +205,7 @@ func NewMigrator(env string) (*Migrator, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
+	log.Printf("✅ Connected to database successfully")
 	return &Migrator{
 		db:  db,
 		env: env,
@@ -194,33 +218,322 @@ func (m *Migrator) Close() {
 	}
 }
 
+func (m *Migrator) createMigrationsTable() error {
+	query := `
+		CREATE SCHEMA IF NOT EXISTS migrations;
+		
+		CREATE TABLE IF NOT EXISTS migrations.schema_migrations (
+			version VARCHAR(255) PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			executed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		);
+		
+		CREATE INDEX IF NOT EXISTS idx_schema_migrations_executed_at 
+		ON migrations.schema_migrations(executed_at);
+	`
+	
+	_, err := m.db.Exec(query)
+	return err
+}
+
 func (m *Migrator) RunMigrations() error {
 	log.Printf("Running migrations for environment: %s", m.env)
-
-	driver, err := postgres.WithInstance(m.db, &postgres.Config{})
+	
+	if err := m.createMigrationsTable(); err != nil {
+		return fmt.Errorf("failed to create migrations table: %w", err)
+	}
+	
+	migrations, err := m.loadMigrationFiles()
 	if err != nil {
-		return fmt.Errorf("failed to create postgres driver: %w", err)
+		return fmt.Errorf("failed to load migration files: %w", err)
 	}
-
-	migrationsPath := "file://migrations"
-	if _, err := os.Stat("migrations"); os.IsNotExist(err) {
-		log.Println("No migrations directory found, creating basic schema...")
-		return m.createBasicSchema()
-	}
-
-	// Fixed: Use 'migrator' instead of 'm' to avoid shadowing the package
-	migrator, err := migrate.NewWithDatabaseInstance(migrationsPath, "postgres", driver)
+	
+	executed, err := m.getExecutedMigrations()
 	if err != nil {
-		return fmt.Errorf("failed to create migrate instance: %w", err)
+		return fmt.Errorf("failed to get executed migrations: %w", err)
 	}
-
-	// Fixed: Now we can access migrate.ErrNoChange
-	if err := migrator.Up(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("failed to run migrations: %w", err)
+	
+	var pending []Migration
+	for _, migration := range migrations {
+		if _, exists := executed[migration.Version]; !exists {
+			pending = append(pending, migration)
+		}
 	}
-
-	log.Println("✅ Migrations completed successfully")
+	
+	if len(pending) == 0 {
+		log.Println("✅ No pending migrations found")
+		return nil
+	}
+	
+	log.Printf("Found %d pending migrations", len(pending))
+	
+	for _, migration := range pending {
+		log.Printf("🔄 Executing migration: %s - %s", migration.Version, migration.Name)
+		
+		// Handle migration 002 without transaction due to complex DDL
+		if migration.Version == "002" {
+			log.Printf("⚠️  Executing migration %s without transaction (complex DDL)", migration.Version)
+			
+			// Execute migration directly
+			if _, err := m.db.Exec(migration.SQL); err != nil {
+				return fmt.Errorf("failed to execute migration %s: %w", migration.Version, err)
+			}
+			
+			// Record migration separately with conflict handling
+			recordSQL := `INSERT INTO migrations.schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING`
+			if _, err := m.db.Exec(recordSQL, migration.Version, migration.Name); err != nil {
+				return fmt.Errorf("failed to record migration %s: %w", migration.Version, err)
+			}
+		} else {
+			// Use transaction for other migrations
+			tx, err := m.db.Begin()
+			if err != nil {
+				return fmt.Errorf("failed to begin transaction: %w", err)
+			}
+			
+			if _, err := tx.Exec(migration.SQL); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("failed to execute migration %s: %w", migration.Version, err)
+			}
+			
+			recordSQL := `INSERT INTO migrations.schema_migrations (version, name) VALUES ($1, $2)`
+			if _, err := tx.Exec(recordSQL, migration.Version, migration.Name); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("failed to record migration %s: %w", migration.Version, err)
+			}
+			
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("failed to commit migration %s: %w", migration.Version, err)
+			}
+		}
+		
+		log.Printf("✅ Migration %s completed", migration.Version)
+	}
+	
+	log.Println("✅ All migrations completed successfully")
 	return nil
+}
+
+func (m *Migrator) RunSeeds() error {
+	log.Printf("Running seeds for environment: %s", m.env)
+
+	var seedFile string
+	switch m.env {
+	case "local":
+		seedFile = "seeds/local_seeds.sql"
+	case "test":
+		seedFile = "seeds/test_seeds.sql"
+	case "production", "prod":
+		seedFile = "seeds/production_seeds.sql"
+	default:
+		seedFile = "seeds/local_seeds.sql"
+	}
+
+	if _, err := os.Stat(seedFile); os.IsNotExist(err) {
+		log.Printf("Seed file %s not found, creating basic seed data...", seedFile)
+		return m.createBasicSeeds()
+	}
+
+	content, err := os.ReadFile(seedFile)
+	if err != nil {
+		return fmt.Errorf("failed to read seed file %s: %w", seedFile, err)
+	}
+
+	log.Printf("Executing seed file: %s", seedFile)
+	if _, err := m.db.Exec(string(content)); err != nil {
+		return fmt.Errorf("failed to execute seeds: %w", err)
+	}
+
+	log.Println("✅ Seeds completed successfully")
+	return nil
+}
+
+func (m *Migrator) createBasicSeeds() error {
+	log.Println("Creating basic seed data...")
+
+	seeds := `
+	-- Set search path
+	SET search_path TO store, public;
+	
+	-- Insert oil & gas industry standard grades
+	INSERT INTO store.grade (grade, description) VALUES 
+	('J55', 'Standard grade steel casing'),
+	('JZ55', 'Enhanced J55 grade'),
+	('L80', 'Higher strength grade'),
+	('N80', 'Medium strength grade'),
+	('P105', 'High performance grade'),
+	('P110', 'Premium performance grade')
+	ON CONFLICT (grade) DO NOTHING;
+	
+	-- Insert common pipe sizes
+	INSERT INTO store.sizes (size, description) VALUES 
+	('5 1/2"', '5.5 inch diameter'),
+	('7"', '7 inch diameter'),
+	('9 5/8"', '9.625 inch diameter'),
+	('13 3/8"', '13.375 inch diameter'),
+	('20"', '20 inch diameter')
+	ON CONFLICT (size) DO NOTHING;
+	
+	-- Insert sample customer (development only)
+	INSERT INTO store.customers (customer, billing_address, billing_city, billing_state, phone, email) VALUES 
+	('Sample Oil Company', '123 Main St', 'Houston', 'TX', '555-0123', 'contact@sampleoil.com')
+	ON CONFLICT DO NOTHING;
+	`
+
+	if _, err := m.db.Exec(seeds); err != nil {
+		return fmt.Errorf("failed to create basic seeds: %w", err)
+	}
+
+	log.Println("✅ Basic seed data created successfully")
+	return nil
+}
+
+func (m *Migrator) ShowStatus() error {
+	fmt.Printf("\n=== Migration Status (Environment: %s) ===\n", m.env)
+
+	// Check if migrations table exists
+	var exists bool
+	err := m.db.QueryRow("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'migrations' AND table_name = 'schema_migrations')").Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("failed to check migrations table: %w", err)
+	}
+
+	if !exists {
+		fmt.Println("❌ Migrations table not found - run 'migrator migrate' first")
+		return nil
+	}
+
+	migrations, err := m.loadMigrationFiles()
+	if err != nil {
+		return fmt.Errorf("failed to load migration files: %w", err)
+	}
+
+	executed, err := m.getExecutedMigrations()
+	if err != nil {
+		return fmt.Errorf("failed to get executed migrations: %w", err)
+	}
+
+	fmt.Printf("%-15s %-30s %-10s %s\n", "Version", "Name", "Status", "Executed At")
+	fmt.Println(strings.Repeat("-", 80))
+
+	for _, migration := range migrations {
+		if exec, exists := executed[migration.Version]; exists {
+			fmt.Printf("%-15s %-30s %-10s %s\n", 
+				migration.Version, 
+				migration.Name, 
+				"✅ Applied", 
+				exec.ExecutedAt.Format("2006-01-02 15:04:05"))
+		} else {
+			fmt.Printf("%-15s %-30s %-10s %s\n", 
+				migration.Version, 
+				migration.Name, 
+				"⏳ Pending", 
+				"-")
+		}
+	}
+
+	fmt.Printf("\nTotal: %d migrations, %d applied, %d pending\n", 
+		len(migrations), len(executed), len(migrations)-len(executed))
+
+	// Check basic tables
+	tables := []string{"customers", "grade", "sizes", "inventory", "received"}
+	fmt.Println("\n📊 Schema Status:")
+	for _, table := range tables {
+		var count int
+		err := m.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM store.%s", table)).Scan(&count)
+		if err != nil {
+			fmt.Printf("  ❌ %s: Error checking table\n", table)
+		} else {
+			fmt.Printf("  ✅ %s: %d records\n", table, count)
+		}
+	}
+
+	fmt.Println("\n✅ Database status check complete")
+	return nil
+}
+
+func (m *Migrator) ResetDatabase() error {
+	log.Printf("⚠️  Resetting database for environment: %s", m.env)
+
+	// Drop and recreate schemas
+	dropSQL := `
+	DROP SCHEMA IF EXISTS store CASCADE;
+	DROP SCHEMA IF EXISTS auth CASCADE;
+	DROP SCHEMA IF EXISTS migrations CASCADE;
+	`
+
+	if _, err := m.db.Exec(dropSQL); err != nil {
+		return fmt.Errorf("failed to drop schemas: %w", err)
+	}
+
+	log.Println("✅ Database reset complete")
+	log.Println("Run 'migrator migrate' and 'migrator seed' to restore")
+	return nil
+}
+
+func (m *Migrator) loadMigrationFiles() ([]Migration, error) {
+	var migrations []Migration
+
+	err := filepath.WalkDir("migrations", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() || !strings.HasSuffix(path, ".sql") {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read migration file %s: %w", path, err)
+		}
+
+		filename := filepath.Base(path)
+		parts := strings.SplitN(strings.TrimSuffix(filename, ".sql"), "_", 2)
+		if len(parts) < 2 {
+			return fmt.Errorf("invalid migration filename format: %s", filename)
+		}
+
+		migration := Migration{
+			Version: parts[0],
+			Name:    strings.ReplaceAll(parts[1], "_", " "),
+			SQL:     string(content),
+		}
+
+		migrations = append(migrations, migration)
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(migrations, func(i, j int) bool {
+		return migrations[i].Version < migrations[j].Version
+	})
+
+	return migrations, nil
+}
+
+func (m *Migrator) getExecutedMigrations() (map[string]Migration, error) {
+	query := `SELECT version, name, executed_at FROM migrations.schema_migrations ORDER BY executed_at`
+
+	rows, err := m.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	executed := make(map[string]Migration)
+	for rows.Next() {
+		var migration Migration
+		if err := rows.Scan(&migration.Version, &migration.Name, &migration.ExecutedAt); err != nil {
+			return nil, err
+		}
+		executed[migration.Version] = migration
+	}
+
+	return executed, rows.Err()
 }
 
 func (m *Migrator) createBasicSchema() error {
@@ -365,130 +678,6 @@ func (m *Migrator) createBasicSchema() error {
 	}
 
 	log.Println("✅ Basic schema created successfully")
-	return nil
-}
-
-func (m *Migrator) RunSeeds() error {
-	log.Printf("Running seeds for environment: %s", m.env)
-
-	var seedFile string
-	switch m.env {
-	case "local":
-		seedFile = "seeds/local_seeds.sql"
-	case "test":
-		seedFile = "seeds/test_seeds.sql"
-	case "production", "prod":
-		seedFile = "seeds/production_seeds.sql"
-	default:
-		seedFile = "seeds/local_seeds.sql"
-	}
-
-	if _, err := os.Stat(seedFile); os.IsNotExist(err) {
-		log.Printf("Seed file %s not found, creating basic seed data...", seedFile)
-		return m.createBasicSeeds()
-	}
-
-	content, err := os.ReadFile(seedFile)
-	if err != nil {
-		return fmt.Errorf("failed to read seed file %s: %w", seedFile, err)
-	}
-
-	log.Printf("Executing seed file: %s", seedFile)
-	if _, err := m.db.Exec(string(content)); err != nil {
-		return fmt.Errorf("failed to execute seeds: %w", err)
-	}
-
-	log.Println("✅ Seeds completed successfully")
-	return nil
-}
-
-func (m *Migrator) createBasicSeeds() error {
-	log.Println("Creating basic seed data...")
-
-	seeds := `
-	-- Set search path
-	SET search_path TO store, public;
-	
-	-- Insert oil & gas industry standard grades
-	INSERT INTO store.grade (grade, description) VALUES 
-	('J55', 'Standard grade steel casing'),
-	('JZ55', 'Enhanced J55 grade'),
-	('L80', 'Higher strength grade'),
-	('N80', 'Medium strength grade'),
-	('P105', 'High performance grade'),
-	('P110', 'Premium performance grade')
-	ON CONFLICT (grade) DO NOTHING;
-	
-	-- Insert common pipe sizes
-	INSERT INTO store.sizes (size, description) VALUES 
-	('5 1/2"', '5.5 inch diameter'),
-	('7"', '7 inch diameter'),
-	('9 5/8"', '9.625 inch diameter'),
-	('13 3/8"', '13.375 inch diameter'),
-	('20"', '20 inch diameter')
-	ON CONFLICT (size) DO NOTHING;
-	
-	-- Insert sample customer (development only)
-	INSERT INTO store.customers (customer, billing_address, billing_city, billing_state, phone, email) VALUES 
-	('Sample Oil Company', '123 Main St', 'Houston', 'TX', '555-0123', 'contact@sampleoil.com')
-	ON CONFLICT DO NOTHING;
-	`
-
-	if _, err := m.db.Exec(seeds); err != nil {
-		return fmt.Errorf("failed to create basic seeds: %w", err)
-	}
-
-	log.Println("✅ Basic seed data created successfully")
-	return nil
-}
-
-func (m *Migrator) ShowStatus() error {
-	fmt.Printf("\n=== Migration Status (Environment: %s) ===\n", m.env)
-
-	// Check if migrations table exists
-	var exists bool
-	err := m.db.QueryRow("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'migrations' AND table_name = 'schema_migrations')").Scan(&exists)
-	if err != nil {
-		return fmt.Errorf("failed to check migrations table: %w", err)
-	}
-
-	if !exists {
-		fmt.Println("❌ Migrations table not found - run 'migrator migrate' first")
-		return nil
-	}
-
-	// Check basic tables
-	tables := []string{"customers", "grade", "sizes", "inventory", "received"}
-	fmt.Println("\n📊 Schema Status:")
-	for _, table := range tables {
-		var count int
-		err := m.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM store.%s", table)).Scan(&count)
-		if err != nil {
-			fmt.Printf("  ❌ %s: Error checking table\n", table)
-		} else {
-			fmt.Printf("  ✅ %s: %d records\n", table, count)
-		}
-	}
-
-	fmt.Println("\n✅ Database status check complete")
-	return nil
-}
-
-func (m *Migrator) ResetDatabase() error {
-	log.Printf("⚠️  Resetting database for environment: %s", m.env)
-
-	// Drop and recreate schemas
-	dropSQL := `
-	DROP SCHEMA IF EXISTS store CASCADE;
-	DROP SCHEMA IF EXISTS migrations CASCADE;
-	`
-
-	if _, err := m.db.Exec(dropSQL); err != nil {
-		return fmt.Errorf("failed to drop schemas: %w", err)
-	}
-
-	log.Println("✅ Database reset complete")
-	log.Println("Run 'migrator migrate' and 'migrator seed' to restore")
 	return nil
 }
 MIGRATOR_EOF
