@@ -22,7 +22,7 @@ if [ -f "${BACKEND_DIR}go.mod" ]; then
     MODULE_NAME=$(grep "^module " "${BACKEND_DIR}go.mod" | awk '{print $2}')
 fi
 if [ -z "$MODULE_NAME" ]; then
-    MODULE_NAME="your-org/oil-gas-inventory"
+    MODULE_NAME="dcotelessa/oil-gas-inventory"
     echo "⚠️  Using default module name: $MODULE_NAME"
 fi
 

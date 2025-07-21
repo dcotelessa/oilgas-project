@@ -1,0 +1,4 @@
+"WkOrder","CustID","Joints","Size","Weight","Grade","Connection","DateIn","WellIn","LeaseIn"
+"WO-001",1,100,"5 1/2""",2500.50,"L80","BTC","2024-01-15","Well-PB-001","Lease-PB-A"
+"WO-002",2,150,"7""",4200.75,"P110","VAM TOP","2024-01-16","Well-EF-002","Lease-EF-B"
+"WO-003",3,75,"9 5/8""",6800.25,"N80","LTC","2024-01-17","Well-BK-003","Lease-BK-C"

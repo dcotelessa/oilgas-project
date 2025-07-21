@@ -1,0 +1,16 @@
+{
+  "oil_gas_mappings": {
+    "custid": "customer_id",
+    "wkorder": "work_order",
+    "datein": "date_in",
+    "wellin": "well_in",
+    "leasein": "lease_in"
+  },
+  "data_types": {
+    "customer_id": "INTEGER",
+    "work_order": "VARCHAR(100)",
+    "date_in": "DATE",
+    "joints": "INTEGER",
+    "weight": "DECIMAL(10,2)"
+  }
+}

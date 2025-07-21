@@ -1,0 +1,4 @@
+"CustID","CustName","BillAddr","BillCity","BillState","BillZip","Phone","Email"
+1,"Permian Basin Energy","1234 Oil Field Rd","Midland","TX","79701","432-555-0101","ops@permianbasin.com"
+2,"Eagle Ford Solutions","5678 Shale Ave","San Antonio","TX","78201","210-555-0201","drilling@eagleford.com"
+3,"Bakken Industries","9012 Prairie Blvd","Williston","ND","58801","701-555-0301","procurement@bakken.com"

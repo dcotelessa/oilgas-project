@@ -46,13 +46,6 @@ help:
 	@echo "  make create-tenant      - Create new tenant"
 	@echo "  make list-tenants       - List all tenants"
 	@echo "  make tenant-status      - Show tenant status"
-	@echo ""
-	@echo "🛠️ Conversion Tools:"
-	@echo "  make tools-status       - Show tools status"
-	@echo "  make tools-setup        - Setup conversion tools"
-	@echo "  make tools-test         - Test conversion tools"
-	@echo "  make convert-mdb FILE=database.mdb - Convert MDB file"
-	@echo "  make analyze-cf DIR=cf_app         - Analyze ColdFusion app"
 
 env-info:
 	@echo "🔧 Environment Information"
@@ -220,58 +213,25 @@ test-env:
 tools: ## Show conversion tool commands
 	@if [ -d "tools/mdb-conversion" ]; then \
 		echo "🔗 Conversion tool commands (cd tools/mdb-conversion && make <command>):"; \
-		cd tools/mdb-conversion && make help 2>/dev/null || echo "  Run 'make tools-setup' first"; \
+		cd tools/mdb-conversion && make help 2>/dev/null || echo "  Run 'make setup-tools' first"; \
 	else \
 		echo "❌ Tools directory not found: tools/mdb-conversion"; \
-		echo "  Run the tools setup script first"; \
+		echo "  Run 'make setup-tools' to create it"; \
 	fi
 
-tools-status: ## Show tools status and configuration
-	@echo "📊 MDB Conversion Tools Status"
-	@echo "=============================="
-	@if [ -d "tools/mdb-conversion" ]; then \
-		cd tools/mdb-conversion && make status 2>/dev/null || echo "❌ Tools not properly set up"; \
-	else \
-		echo "❌ Tools directory not found: tools/mdb-conversion"; \
-		echo "  Run the tools setup script first"; \
-	fi
-
-tools-setup: ## Setup conversion tools
+setup-tools: ## Setup conversion tools
 	@echo "🔧 Setting up conversion tools..."
 	@if [ ! -d "tools/mdb-conversion" ]; then \
-		echo "❌ Tools directory not found - run the setup script first"; \
-		echo "  Example: ./minimal_tools_setup.sh"; \
+		echo "❌ Tools directory not found - structure needs to be created first"; \
 		exit 1; \
 	fi
 	@cd tools/mdb-conversion && make setup
 	@echo "✅ Conversion tools ready!"
 
-tools-test: ## Test conversion tools
-	@echo "🧪 Testing conversion tools..."
-	@if [ -d "tools/mdb-conversion" ]; then \
-		cd tools/mdb-conversion && make test; \
-	else \
-		echo "❌ Tools directory not found"; \
-	fi
-
-tools-help: ## Show detailed tools help
-	@echo "🛠️  Detailed Tools Help"
-	@echo "======================="
-	@if [ -d "tools/mdb-conversion" ]; then \
-		cd tools/mdb-conversion && make help; \
-	else \
-		echo "❌ Tools directory not found"; \
-		echo "  Run the tools setup script first"; \
-	fi
-
-# Conversion shortcuts
+# Convenience shortcuts for conversion tools
 convert-mdb: ## Convert MDB file (usage: make convert-mdb FILE=database.mdb)
 	@if [ -z "$(FILE)" ]; then \
 		echo "❌ Usage: make convert-mdb FILE=path/to/database.mdb"; \
-		exit 1; \
-	fi
-	@if [ ! -f "$(FILE)" ]; then \
-		echo "❌ File not found: $(FILE)"; \
 		exit 1; \
 	fi
 	@cd tools/mdb-conversion && make convert-mdb FILE="$(abspath $(FILE))"
@@ -281,42 +241,14 @@ analyze-cf: ## Analyze ColdFusion app (usage: make analyze-cf DIR=cf_app)
 		echo "❌ Usage: make analyze-cf DIR=path/to/cf_application"; \
 		exit 1; \
 	fi
-	@if [ ! -d "$(DIR)" ]; then \
-		echo "❌ Directory not found: $(DIR)"; \
-		exit 1; \
-	fi
 	@cd tools/mdb-conversion && make analyze-cf DIR="$(abspath $(DIR))"
 
 test-conversion: ## Run conversion tool tests
-	@cd tools/mdb-conversion && make test-conversion 2>/dev/null || echo "❌ Conversion tests not available"
+	@cd tools/mdb-conversion && make test-conversion
 
 full-analysis: ## Complete analysis (usage: make full-analysis COMPANY=company_name)
 	@if [ -z "$(COMPANY)" ]; then \
 		echo "❌ Usage: make full-analysis COMPANY=company_name"; \
 		exit 1; \
 	fi
-	@cd tools/mdb-conversion && make full-analysis COMPANY="$(COMPANY)" 2>/dev/null || echo "❌ Full analysis not available"
-
-# Tools reporting
-tools-report: ## Generate tools usage report
-	@echo "📋 MDB Conversion Tools Report"
-	@echo "=============================="
-	@if [ -d "output/conversion" ]; then \
-		echo "📂 Processed Companies:"; \
-		find output/conversion -type d -maxdepth 1 -mindepth 1 -exec basename {} \; | sort; \
-		echo ""; \
-		echo "📊 Conversion Files:"; \
-		find output/conversion -name "*.csv" -o -name "*.sql" | wc -l | xargs echo "  Total files:"; \
-	else \
-		echo "❌ No conversions found - output/conversion directory missing"; \
-	fi
-
-# Quick tools setup
-quick-tools-setup: ## Quick setup for tools (creates minimal structure)
-	@echo "⚡ Quick tools setup..."
-	@if [ -f "minimal_tools_setup.sh" ]; then \
-		./minimal_tools_setup.sh; \
-	else \
-		echo "❌ minimal_tools_setup.sh script not found"; \
-		echo "  Create this script first or run the full setup"; \
-	fi
+	@cd tools/mdb-conversion && make full-analysis COMPANY="$(COMPANY)"

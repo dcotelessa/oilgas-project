@@ -1,0 +1,21 @@
+# Input data files (sensitive - do not commit)
+/input/
+*.mdb
+*.accdb
+*.ldb
+
+# Company-specific data
+*_company_*
+*_client_*
+*_customer_*
+
+# Temporary processing files
+*.tmp
+*.temp
+/temp/
+/archives/
+
+# Output files with real data
+/output/*.csv
+/output/*.sql
+/output/*.json

@@ -125,7 +125,7 @@ if [[ ! -f ".env" ]]; then
     echo "📝 Creating .env configuration with consistent database naming..."
     cat > .env << 'EOF'
 # Oil & Gas Inventory System Configuration
-DATABASE_URL=postgres://postgres:postgres123@localhost:5432/oil_gas_inventory?sslmode=disable
+DATABASE_URL=postgresql://postgres:postgres123@localhost:5432/oil_gas_inventory?sslmode=disable
 APP_PORT=8000
 APP_ENV=local
 DEBUG=true
@@ -152,7 +152,7 @@ else
         # Backup original
         cp .env .env.backup
         # Update DATABASE_URL to consistent naming
-        sed -i.tmp 's|DATABASE_URL=.*|DATABASE_URL=postgres://postgres:postgres123@localhost:5432/oil_gas_inventory?sslmode=disable|' .env
+        sed -i.tmp 's|DATABASE_URL=.*|DATABASE_URL=postgresql://postgres:postgres123@localhost:5432/oil_gas_inventory?sslmode=disable|' .env
         rm -f .env.tmp
         echo "✅ Database URL fixed to use consistent naming: oil_gas_inventory"
     else
@@ -228,7 +228,7 @@ func main() {
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		// ENFORCED: Use consistent database name in fallback
-		databaseURL = "postgres://postgres:postgres123@localhost:5432/oil_gas_inventory?sslmode=disable"
+		databaseURL = "postgresql://postgres:postgres123@localhost:5432/oil_gas_inventory?sslmode=disable"
 		fmt.Println("⚠️  Using fallback DATABASE_URL with consistent naming")
 	}
 
@@ -236,7 +236,7 @@ func main() {
 	if !contains(databaseURL, "oil_gas_inventory") {
 		fmt.Printf("🔧 Database URL correction needed. Current: %s\n", databaseURL)
 		// Force consistent database name
-		databaseURL = "postgres://postgres:postgres123@localhost:5432/oil_gas_inventory?sslmode=disable"
+		databaseURL = "postgresql://postgres:postgres123@localhost:5432/oil_gas_inventory?sslmode=disable"
 		fmt.Printf("🔧 Corrected to: %s\n", databaseURL)
 	}
 
@@ -880,7 +880,7 @@ if [[ -n "${DATABASE_URL:-}" ]]; then
     if [[ "$DATABASE_URL" != *"oil_gas_inventory"* ]]; then
         echo "⚠️  Environment variable DATABASE_URL uses different database name"
         echo "🔧 Temporarily overriding for consistency..."
-        export DATABASE_URL="postgres://postgres:postgres123@localhost:5432/oil_gas_inventory?sslmode=disable"
+        export DATABASE_URL="postgresql://postgres:postgres123@localhost:5432/oil_gas_inventory?sslmode=disable"
         CONFLICT_FOUND=true
     fi
 fi

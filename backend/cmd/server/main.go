@@ -1,167 +1,171 @@
 package main
 
 import (
-	"context"
-	"fmt"
-	"log"
-	"net/http"
-	"os"
-	"time"
+    "database/sql"
+    "fmt"
+    "log"
+    "net/http"
+    "os"
+    "time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/joho/godotenv"
-
-	"github.com/dcotelessa/oilgas-project/internal/auth"
-	"github.com/dcotelessa/oilgas-project/internal/handlers"
-	"github.com/dcotelessa/oilgas-project/pkg/cache"
+    "github.com/gin-gonic/gin"
+    "github.com/joho/godotenv"
+    _ "github.com/lib/pq"
+    
+    "github.com/dcotelessa/oilgas-project/internal/handlers"
+    "github.com/dcotelessa/oilgas-project/internal/middleware"
+    "github.com/dcotelessa/oilgas-project/internal/repository"
+    "github.com/dcotelessa/oilgas-project/internal/services"
 )
 
 func main() {
-	// Load environment variables
-	if err := godotenv.Load(".env"); err != nil {
-		log.Printf("Warning: Could not load .env file: %v", err)
-	}
+    // Load environment variables
+    if err := godotenv.Load(".env"); err != nil {
+        log.Printf("Warning: Could not load .env file: %v", err)
+    }
 
-	// Set Gin mode
-	if os.Getenv("APP_ENV") == "production" {
-		gin.SetMode(gin.ReleaseMode)
-	}
+    // Database connection
+    db, err := connectDB()
+    if err != nil {
+        log.Fatalf("Failed to connect to database: %v", err)
+    }
+    defer db.Close()
 
-	// Initialize database with proven settings
-	pool, err := initializeDatabase()
-	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
-	}
-	defer pool.Close()
+    // Set Gin mode
+    if os.Getenv("APP_ENV") == "production" {
+        gin.SetMode(gin.ReleaseMode)
+    }
 
-	// Initialize in-memory cache (no Redis dependency)
-	memCache := cache.NewWithDefaultExpiration(10*time.Minute, 5*time.Minute)
+    // Create router
+    router := gin.New()
+    router.Use(gin.Logger())
+    router.Use(gin.Recovery())
 
-	// Initialize components
-	sessionManager := auth.NewTenantSessionManager(pool, memCache)
+    // CORS middleware
+    router.Use(func(c *gin.Context) {
+        c.Header("Access-Control-Allow-Origin", "*")
+        c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Tenant-ID")
 
-	// Initialize handlers
-	authHandler := handlers.NewAuthHandler(sessionManager)
+        if c.Request.Method == "OPTIONS" {
+            c.AbortWithStatus(204)
+            return
+        }
 
-	// Setup router
-	router := setupRouter(sessionManager, authHandler)
+        c.Next()
+    })
 
-	// Start server
-	port := os.Getenv("APP_PORT")
-	if port == "" {
-		port = "8000"
-	}
+    // Initialize repositories and services
+    tenantRepo := repository.NewTenantRepository(db)
+    tenantService := services.NewTenantService(tenantRepo)
 
-	fmt.Printf("🚀 Starting Oil & Gas Inventory API server on port %s\n", port)
-	fmt.Printf("📋 Health check: http://localhost:%s/health\n", port)
-	fmt.Printf("🔌 API base: http://localhost:%s/api/v1\n", port)
-	fmt.Printf("🔐 Authentication: Session-based with tenant isolation\n")
+    // Initialize handlers
+    tenantHandler := handlers.NewTenantHandler(tenantService)
 
-	if err := http.ListenAndServe(":"+port, router); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
+    // Initialize middleware
+    tenantMiddleware := middleware.NewTenantMiddleware(db)
+
+    // Health check
+    router.GET("/health", func(c *gin.Context) {
+        c.JSON(http.StatusOK, gin.H{
+            "status":    "ok",
+            "timestamp": time.Now().Unix(),
+            "service":   "oil-gas-inventory-api",
+            "version":   "1.0.0",
+            "tenant_aware": true,
+        })
+    })
+
+    // API v1 routes
+    v1 := router.Group("/api/v1")
+    {
+        // Public endpoints (no auth required)
+        v1.GET("/status", func(c *gin.Context) {
+            c.JSON(http.StatusOK, gin.H{
+                "message": "Oil & Gas Inventory API",
+                "status":  "running",
+                "env":     os.Getenv("APP_ENV"),
+                "features": []string{"multi-tenant", "authentication", "rls"},
+            })
+        })
+
+        // Authenticated endpoints
+        auth := v1.Group("/")
+        // auth.Use(authMiddleware.Authenticate()) // Uncomment when auth is implemented
+        auth.Use(tenantMiddleware.SetTenantContext())
+        {
+            // Tenant management (admin only)
+            tenants := auth.Group("/tenants")
+            tenants.Use(tenantMiddleware.RequireAdmin())
+            {
+                tenants.POST("/", tenantHandler.CreateTenant)
+                tenants.GET("/", tenantHandler.ListTenants)
+                tenants.GET("/:id", tenantHandler.GetTenant)
+                tenants.POST("/assign-customer", tenantHandler.AssignCustomerToTenant)
+            }
+
+            // Current tenant context
+            auth.GET("/tenant/current", tenantHandler.GetCurrentTenant)
+            auth.POST("/tenant/switch", tenantMiddleware.RequireAdmin(), tenantHandler.SwitchTenant)
+            auth.GET("/tenant/customers", tenantHandler.GetTenantCustomers)
+
+            // Business endpoints (tenant-aware)
+            auth.GET("/customers", func(c *gin.Context) {
+                c.JSON(http.StatusOK, gin.H{
+                    "message": "Tenant-aware customers endpoint",
+                    "tenant_id": c.GetInt("tenant_id"),
+                })
+            })
+
+            auth.GET("/inventory", func(c *gin.Context) {
+                c.JSON(http.StatusOK, gin.H{
+                    "message": "Tenant-aware inventory endpoint", 
+                    "tenant_id": c.GetInt("tenant_id"),
+                })
+            })
+
+            auth.GET("/received", func(c *gin.Context) {
+                c.JSON(http.StatusOK, gin.H{
+                    "message": "Tenant-aware work orders endpoint",
+                    "tenant_id": c.GetInt("tenant_id"),
+                })
+            })
+        }
+    }
+
+    // Start server
+    port := os.Getenv("APP_PORT")
+    if port == "" {
+        port = "8000"
+    }
+
+    fmt.Printf("🚀 Starting Multi-Tenant Oil & Gas Inventory API on port %s\n", port)
+    fmt.Printf("📋 Health check: http://localhost:%s/health\n", port)
+    fmt.Printf("🔌 API base: http://localhost:%s/api/v1\n", port)
+    fmt.Printf("🏢 Tenant-aware: ✅\n")
+
+    log.Fatal(http.ListenAndServe(":"+port, router))
 }
 
-func initializeDatabase() (*pgxpool.Pool, error) {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		return nil, fmt.Errorf("DATABASE_URL environment variable not set")
-	}
+func connectDB() (*sql.DB, error) {
+    databaseURL := os.Getenv("DATABASE_URL")
+    if databaseURL == "" {
+        return nil, fmt.Errorf("DATABASE_URL environment variable not set")
+    }
 
-	config, err := pgxpool.ParseConfig(databaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse database config: %w", err)
-	}
+    db, err := sql.Open("postgres", databaseURL)
+    if err != nil {
+        return nil, err
+    }
 
-	// Proven connection pool settings for tenant isolation
-	config.MaxConns = 25
-	config.MinConns = 10
-	config.MaxConnLifetime = 30 * time.Minute
-	config.MaxConnIdleTime = 5 * time.Minute
+    if err := db.Ping(); err != nil {
+        return nil, err
+    }
 
-	pool, err := pgxpool.NewWithConfig(context.Background(), config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create connection pool: %w", err)
-	}
+    // Set connection pool settings
+    db.SetMaxOpenConns(25)
+    db.SetMaxIdleConns(10)
+    db.SetConnMaxLifetime(time.Hour)
 
-	if err := pool.Ping(context.Background()); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	log.Printf("✅ Database connected with %d max connections", config.MaxConns)
-	return pool, nil
-}
-
-func setupRouter(sessionManager *auth.TenantSessionManager, authHandler *handlers.AuthHandler) *gin.Engine {
-	router := gin.New()
-	router.Use(gin.Logger())
-	router.Use(gin.Recovery())
-
-	// CORS middleware for development
-	router.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization")
-		c.Header("Access-Control-Allow-Credentials", "true")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
-	})
-
-	// Health check endpoint
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":    "ok",
-			"timestamp": time.Now().Unix(),
-			"service":   "oil-gas-inventory-api",
-			"version":   "1.0.0-phase3",
-			"features": []string{
-				"tenant-isolation",
-				"session-auth",
-				"row-level-security",
-				"in-memory-cache",
-			},
-		})
-	})
-
-	// API routes
-	v1 := router.Group("/api/v1")
-	
-	// Authentication endpoints (public)
-	auth := v1.Group("/auth")
-	{
-		auth.POST("/login", authHandler.Login)
-		auth.POST("/logout", authHandler.Logout)
-	}
-
-	// Protected endpoints
-	protected := v1.Group("")
-	protected.Use(sessionManager.RequireAuth())
-	{
-		protected.GET("/auth/me", authHandler.Me)
-		
-		// Placeholder for Phase 4 endpoints
-		protected.GET("/customers", func(c *gin.Context) {
-			c.JSON(200, gin.H{
-				"message": "Customers endpoint - Phase 4 implementation",
-				"tenant_id": c.GetString("tenant_id"),
-				"user_role": c.GetString("user_role"),
-			})
-		})
-		
-		protected.GET("/inventory", func(c *gin.Context) {
-			c.JSON(200, gin.H{
-				"message": "Inventory endpoint - Phase 4 implementation",
-				"tenant_id": c.GetString("tenant_id"),
-				"user_role": c.GetString("user_role"),
-			})
-		})
-	}
-
-	return router
+    return db, nil
 }

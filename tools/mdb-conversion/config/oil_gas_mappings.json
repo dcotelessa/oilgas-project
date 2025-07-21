@@ -1,0 +1,64 @@
+{
+  "domain_mappings": {
+    "work_order": {
+      "patterns": ["wo", "wkorder", "workorder", "work_order"],
+      "normalized": "work_order",
+      "type": "VARCHAR(100)",
+      "description": "Work order number or identifier"
+    },
+    "customer": {
+      "patterns": ["custid", "customerid", "customer_id", "custname", "customername"],
+      "normalized": "customer",
+      "type": "VARCHAR(255)",
+      "description": "Customer company name or ID"
+    },
+    "pipe_size": {
+      "patterns": ["size", "pipesize", "diameter", "od"],
+      "normalized": "size",
+      "type": "VARCHAR(50)",
+      "description": "Pipe outside diameter (e.g., 5 1/2\", 7\", 9 5/8\")"
+    },
+    "grade": {
+      "patterns": ["grade", "steel_grade", "material_grade"],
+      "normalized": "grade", 
+      "type": "VARCHAR(10)",
+      "description": "Steel grade (J55, L80, N80, P110, etc.)"
+    },
+    "connection": {
+      "patterns": ["conn", "connection", "conntype", "thread"],
+      "normalized": "connection",
+      "type": "VARCHAR(100)",
+      "description": "Thread connection type (BTC, LTC, STC, VAM, etc.)"
+    },
+    "weight": {
+      "patterns": ["weight", "wt", "pipe_weight"],
+      "normalized": "weight",
+      "type": "DECIMAL(10,2)",
+      "description": "Total weight in pounds"
+    },
+    "joints": {
+      "patterns": ["joints", "joint_count", "pieces", "qty"],
+      "normalized": "joints",
+      "type": "INTEGER",
+      "description": "Number of pipe joints"
+    }
+  },
+  "transformation_rules": {
+    "date_fields": {
+      "patterns": ["date", "when"],
+      "transforms": [
+        "Replace empty strings with NULL",
+        "Convert MM/DD/YYYY to YYYY-MM-DD",
+        "Handle 'Now()' function calls"
+      ]
+    },
+    "boolean_fields": {
+      "patterns": ["deleted", "active", "complete", "required"],
+      "transforms": [
+        "Convert 'Yes'/'No' to true/false",
+        "Convert 1/0 to true/false",
+        "Default to false for NULL values"
+      ]
+    }
+  }
+}

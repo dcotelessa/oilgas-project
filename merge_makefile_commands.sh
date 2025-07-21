@@ -1,3 +1,16 @@
+#!/bin/bash
+# merge_makefile_commands.sh - Add missing tools commands to your existing Makefile
+
+set -e
+
+echo "🔧 Merging new tools commands into existing Makefile"
+
+# Backup existing Makefile
+cp Makefile Makefile.backup.$(date +%Y%m%d_%H%M%S)
+echo "💾 Backup created: Makefile.backup.$(date +%Y%m%d_%H%M%S)"
+
+# Create updated Makefile by replacing the tools section
+cat > Makefile.new << 'EOF'
 # Oil & Gas Inventory System - Makefile
 # Load environment variables from .env.local or .env
 ifneq (,$(wildcard ./.env.local))
@@ -320,3 +333,26 @@ quick-tools-setup: ## Quick setup for tools (creates minimal structure)
 		echo "❌ minimal_tools_setup.sh script not found"; \
 		echo "  Create this script first or run the full setup"; \
 	fi
+EOF
+
+# Replace the original Makefile
+mv Makefile.new Makefile
+
+echo "✅ Makefile updated successfully!"
+echo ""
+echo "🆕 New commands added:"
+echo "  make tools-status       # Show tools status"
+echo "  make tools-setup        # Setup tools"
+echo "  make tools-test         # Test tools"
+echo "  make tools-help         # Detailed tools help"
+echo "  make tools-report       # Usage report"
+echo "  make quick-tools-setup  # Quick setup"
+echo ""
+echo "🔧 Enhanced existing commands:"
+echo "  make help               # Now includes tools section"
+echo "  make convert-mdb        # Better error checking"
+echo "  make analyze-cf         # Better error checking"
+echo ""
+echo "🧪 Test the new commands:"
+echo "  make tools-status"
+echo "  make help"

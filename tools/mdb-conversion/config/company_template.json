@@ -1,0 +1,29 @@
+{
+  "company_info": {
+    "name": "",
+    "industry": "oil_gas",
+    "database_type": "access_mdb",
+    "conversion_date": "",
+    "contact": ""
+  },
+  "file_locations": {
+    "mdb_files": [],
+    "cf_application": "",
+    "output_directory": ""
+  },
+  "custom_mappings": {
+    "tables": {},
+    "columns": {},
+    "business_rules": []
+  },
+  "validation_rules": {
+    "required_tables": ["customers", "inventory", "received"],
+    "required_columns": ["customer", "work_order", "size", "grade"],
+    "data_quality_checks": [
+      "No duplicate work orders",
+      "Valid customer references", 
+      "Standard pipe sizes",
+      "Valid steel grades"
+    ]
+  }
+}
