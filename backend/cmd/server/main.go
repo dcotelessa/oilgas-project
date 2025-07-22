@@ -12,10 +12,10 @@ import (
     "github.com/joho/godotenv"
     _ "github.com/lib/pq"
     
-    "github.com/dcotelessa/oil-gas-inventory/internal/handlers"
-    "github.com/dcotelessa/oil-gas-inventory/internal/middleware"
-    "github.com/dcotelessa/oil-gas-inventory/internal/repository"
-    "github.com/dcotelessa/oil-gas-inventory/internal/services"
+    "oilgas-backend/internal/handlers"
+    "oilgas-backend/internal/middleware"
+    "oilgas-backend/internal/repository"
+    "oilgas-backend/internal/services"
 )
 
 func main() {

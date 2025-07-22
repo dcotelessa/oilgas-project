@@ -139,6 +139,7 @@ test-results/
 
 # Migration analysis (may contain sensitive schema info)
 database/*
+tools/input/**
 
 # ===== BACKUP AND ARCHIVE FILES =====
 *.bak

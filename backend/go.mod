@@ -1,4 +1,4 @@
-module github.com/dcotelessa/oil-gas-inventory
+module oilgas-backend
 
 go 1.23.0
 

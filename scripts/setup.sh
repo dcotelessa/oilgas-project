@@ -334,7 +334,7 @@ check_prerequisites() {
         # Create basic go.mod if it doesn't exist
         if [ ! -f "backend/go.mod" ]; then
             cat > backend/go.mod << 'EOF'
-module github.com/dcotelessa/oil-gas-inventory
+module oilgas-backend
 
 go 1.21
 

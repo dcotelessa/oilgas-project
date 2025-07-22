@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/dcotelessa/oil-gas-inventory/tools/internal/config"
-	"github.com/dcotelessa/oil-gas-inventory/tools/internal/processor"
-	"github.com/dcotelessa/oil-gas-inventory/tools/internal/reporting"
+	"tools/internal/config"
+	"tools/internal/processor"
+	"tools/internal/reporting"
 )
 
 const (
@@ -183,7 +183,7 @@ ENVIRONMENT VARIABLES:
     DATABASE_URL    - PostgreSQL connection string
     LOG_LEVEL       - Logging level (debug, info, warn, error)
     
-For more information, see: https://github.com/dcotelessa/oil-gas-inventory/tools
+For more information, see: https://github.com/dcotelessa/oilgas-project/tools
 `)
 }
 

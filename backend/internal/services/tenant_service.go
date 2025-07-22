@@ -5,8 +5,8 @@ import (
     "regexp"
     "strings"
     
-    "github.com/dcotelessa/oil-gas-inventory/internal/models"
-    "github.com/dcotelessa/oil-gas-inventory/internal/repository"
+    "oilgas-backend/internal/models"
+    "oilgas-backend/internal/repository"
 )
 
 type TenantService struct {

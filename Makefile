@@ -228,7 +228,7 @@ migration-setup: ## Setup migration tools environment
 	@echo "🛠️  Setting up migration tools..."
 	@mkdir -p $(TOOLS_DIR)/{cmd,internal/{config,processor,mapping,validation,exporters,reporting},test,config,bin,output}
 	@if [ ! -f "$(TOOLS_DIR)/go.mod" ]; then \
-		cd $(TOOLS_DIR) && go mod init github.com/dcotelessa/oil-gas-inventory/tools; \
+		cd $(TOOLS_DIR) && go mod init oilgas-tools; \
 	fi
 	@if [ ! -f "$(TOOLS_DIR)/config/oil_gas_mappings.json" ]; then \
 		echo '{"oil_gas_mappings":{},"processing_options":{"workers":4,"batch_size":1000}}' > $(TOOLS_DIR)/config/oil_gas_mappings.json; \
@@ -748,7 +748,7 @@ info: ## Show system information
 	@echo "ℹ️  System Information"
 	@echo "====================="
 	@echo "Project: Oil & Gas Inventory Management System"
-	@echo "Repository: github.com/dcotelessa/oil-gas-inventory"
+	@echo "Repository: github.com/dcotelessa/oilgas-project"
 	@echo "Version: 1.0.0"
 	@echo "Go Version: $(shell go version 2>/dev/null || echo 'Not installed')"
 	@echo "Node Version: $(shell node --version 2>/dev/null || echo 'Not installed')"
