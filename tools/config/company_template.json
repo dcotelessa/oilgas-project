@@ -1,0 +1,10 @@
+{
+  "company_name": "Default Company",
+  "work_order_prefix": "WO",
+  "custom_mappings": {},
+  "contact_info": {
+    "primary_contact": "Unknown",
+    "email": "",
+    "phone": ""
+  }
+}

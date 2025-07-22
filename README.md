@@ -43,7 +43,7 @@ store.user_tenant_roles          # User permissions within tenants
 
 1. **Clone and setup**
    ```bash
-   git clone https://github.com/dcotelessa/oilgas-project
+   git clone https://github.com/dcotelessa/oil-gas-inventory
    cd oilgas-project
    ```
 

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcotelessa/oilgas-project/pkg/cache"
+	"github.com/dcotelessa/oil-gas-inventory/pkg/cache"
 )
 
 func TestMemoryCache(t *testing.T) {

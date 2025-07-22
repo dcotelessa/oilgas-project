@@ -163,3 +163,9 @@ coldfusion_files/
 !backend/cmd/**
 !backend/internal/**
 !backend/pkg/**
+
+# Tools build artifacts
+tools/bin/
+tools/output/
+tools/coverage/
+tools/*.tmp

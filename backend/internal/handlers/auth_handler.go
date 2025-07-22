@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/dcotelessa/oilgas-project/internal/auth"
+	"github.com/dcotelessa/oil-gas-inventory/internal/auth"
 )
 
 type AuthHandler struct {

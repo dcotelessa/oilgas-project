@@ -3,9 +3,9 @@ package tenant_test
 import (
     "testing"
     
-    "github.com/dcotelessa/oilgas-project/internal/models"
-    "github.com/dcotelessa/oilgas-project/internal/repository"
-    "github.com/dcotelessa/oilgas-project/internal/services"
+    "github.com/dcotelessa/oil-gas-inventory/internal/models"
+    "github.com/dcotelessa/oil-gas-inventory/internal/repository"
+    "github.com/dcotelessa/oil-gas-inventory/internal/services"
 )
 
 func TestTenantService_CreateTenant(t *testing.T) {

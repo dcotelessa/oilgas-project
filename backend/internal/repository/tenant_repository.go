@@ -4,7 +4,7 @@ import (
     "database/sql"
     "fmt"
     
-    "github.com/dcotelessa/oilgas-project/internal/models"
+    "github.com/dcotelessa/oil-gas-inventory/internal/models"
 )
 
 type TenantRepository struct {

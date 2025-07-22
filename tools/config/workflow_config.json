@@ -1,0 +1,25 @@
+{
+  "workflows": [
+    {
+      "name": "mdb_conversion",
+      "description": "Convert MDB files to PostgreSQL",
+      "steps": [
+        {"name": "analyze", "required": true, "description": "Analyze MDB structure"},
+        {"name": "extract", "required": true, "description": "Extract data from MDB"},
+        {"name": "validate", "required": true, "description": "Validate business rules"},
+        {"name": "transform", "required": true, "description": "Transform and normalize data"},
+        {"name": "export", "required": true, "description": "Export to target formats"}
+      ]
+    },
+    {
+      "name": "coldfusion_analysis",
+      "description": "Analyze ColdFusion applications",
+      "steps": [
+        {"name": "scan", "required": true, "description": "Scan ColdFusion files"},
+        {"name": "parse", "required": true, "description": "Parse SQL queries"},
+        {"name": "analyze", "required": true, "description": "Analyze dependencies"},
+        {"name": "report", "required": true, "description": "Generate analysis report"}
+      ]
+    }
+  ]
+}

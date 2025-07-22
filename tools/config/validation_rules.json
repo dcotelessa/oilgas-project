@@ -1,0 +1,16 @@
+[
+  {
+    "field_name": "grade",
+    "rule_type": "enum",
+    "parameters": ["J55", "JZ55", "L80", "N80", "P105", "P110", "Q125"],
+    "error_action": "warn",
+    "error_message": "Invalid grade specified"
+  },
+  {
+    "field_name": "work_order",
+    "rule_type": "format",
+    "parameters": ["^[A-Z]{1,3}-\\d{6}$"],
+    "error_action": "reject",
+    "error_message": "Work order must follow pattern: ABC-123456"
+  }
+]

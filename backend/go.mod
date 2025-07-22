@@ -1,4 +1,4 @@
-module github.com/dcotelessa/oilgas-project
+module github.com/dcotelessa/oil-gas-inventory
 
 go 1.23.0
 

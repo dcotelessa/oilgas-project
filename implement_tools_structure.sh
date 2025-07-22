@@ -51,9 +51,9 @@ create_go_module() {
     cd "$MDB_CONVERSION_DIR"
     
     # Determine organization name from existing backend module if available
-    ORG_NAME="your-org"
+    ORG_NAME="dcotelessa"
     if [ -f "$PROJECT_ROOT/backend/go.mod" ]; then
-        ORG_NAME=$(grep "^module" "$PROJECT_ROOT/backend/go.mod" | awk '{print $2}' | cut -d'/' -f1-2 || echo "your-org")
+        ORG_NAME=$(grep "^module" "$PROJECT_ROOT/backend/go.mod" | awk '{print $2}' | cut -d'/' -f1-2 || echo "dcotelessa")
     fi
     
     cat > go.mod << EOF

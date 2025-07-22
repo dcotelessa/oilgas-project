@@ -1,0 +1,3 @@
+"CustID","CustName","WkOrder","DateIn","Joints","Size","Weight"
+1,"Test Company 1","WO-001","2024-01-15",100,"5 1/2""",2500.50
+2,"Test Company 2","WO-002","2024-01-16",150,"7""",4200.75

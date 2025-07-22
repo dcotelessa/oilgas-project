@@ -5,8 +5,8 @@ import (
     "strconv"
     
     "github.com/gin-gonic/gin"
-    "github.com/dcotelessa/oilgas-project/internal/models"
-    "github.com/dcotelessa/oilgas-project/internal/services"
+    "github.com/dcotelessa/oil-gas-inventory/internal/models"
+    "github.com/dcotelessa/oil-gas-inventory/internal/services"
 )
 
 type TenantHandler struct {
