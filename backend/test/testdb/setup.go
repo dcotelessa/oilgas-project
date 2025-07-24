@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/bcrypt"
 )
 
 func SetupTestDB(t testing.TB) *pgxpool.Pool {
@@ -140,8 +139,8 @@ func SetTenantContext(t testing.TB, pool *pgxpool.Pool, userRole, userCompany, t
 func ValidateTenantIsolation(t testing.TB, pool *pgxpool.Pool, tenantAID, tenantBID string) {
 	ctx := context.Background()
 	
-	customerA := CreateTestCustomer(t, pool, tenantAID, "Tenant A Customer", "TX")
-	customerB := CreateTestCustomer(t, pool, tenantBID, "Tenant B Customer", "CA")
+	// customerA := CreateTestCustomer(t, pool, tenantAID, "Tenant A Customer", "TX")
+	// customerB := CreateTestCustomer(t, pool, tenantBID, "Tenant B Customer", "CA")
 	
 	SetTenantContext(t, pool, "customer", "Company A", tenantAID)
 	

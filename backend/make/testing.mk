@@ -32,3 +32,12 @@ test-db-setup: ## Setup test database
 		export TEST_DATABASE_URL="postgresql://postgres:password@localhost:5432/oil_gas_test?sslmode=disable"; \
 	fi
 	@echo "$(GREEN)✅ Test database ready$(RESET)"
+
+test-db-reset: ## Reset test database completely
+	@echo "$(GREEN)Resetting test database...$(RESET)"
+	@DATABASE_URL="$(TEST_DATABASE_URL)" go run migrator.go reset local
+	@DATABASE_URL="$(TEST_DATABASE_URL)" go run migrator.go migrate local
+
+test-isolated: test-db-reset ## Run tests with clean database
+	@echo "$(GREEN)Running tests with isolated database...$(RESET)"
+	@go test ./internal/repository/postgres/... -v -count=1
