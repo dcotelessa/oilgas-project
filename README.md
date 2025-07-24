@@ -74,12 +74,12 @@ Create `.env.local` with your database settings:
 
 ```bash
 # Database Configuration
-DATABASE_URL=postgresql://username:password@localhost:5432/oil_gas_inventory
-POSTGRES_DB=oil_gas_inventory
+DATABASE_URL=postgresql://username:password@localhost:5433/oilgas_inventory_local
+POSTGRES_DB=oilgas_inventory_local
 POSTGRES_USER=username
 POSTGRES_PASSWORD=password
 POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
+POSTGRES_PORT=5433
 
 # Application Configuration
 APP_ENV=local

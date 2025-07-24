@@ -71,11 +71,11 @@ setup_environment() {
     
     # Normalize database variables from different naming conventions
     # Use POSTGRES_* variables if they exist, otherwise fall back to DB_*
-    DB_NAME=${DB_NAME:-${POSTGRES_DB:-oil_gas_inventory}}
+    DB_NAME=${DB_NAME:-${POSTGRES_DB:-oilgas_inventory_local}}
     DB_USER=${DB_USER:-${POSTGRES_USER:-postgres}}
-    DB_PASSWORD=${DB_PASSWORD:-${POSTGRES_PASSWORD:-password}}
+    DB_PASSWORD=${DB_PASSWORD:-${POSTGRES_PASSWORD:-postgres123}}
     DB_HOST=${DB_HOST:-${POSTGRES_HOST:-localhost}}
-    DB_PORT=${DB_PORT:-${POSTGRES_PORT:-5432}}
+    DB_PORT=${DB_PORT:-${POSTGRES_PORT:-5433}}
     
     # Normalize DATABASE_URL format (postgres:// to postgresql://)
     if [ -n "$DATABASE_URL" ]; then
@@ -116,7 +116,7 @@ setup_database() {
         echo -e "${YELLOW}💡 To start PostgreSQL:${NC}"
         echo "   macOS (Homebrew): brew services start postgresql"
         echo "   Ubuntu/Debian:    sudo systemctl start postgresql"
-        echo "   Docker:           docker run --name postgres -e POSTGRES_PASSWORD=$DB_PASSWORD -p 5432:5432 -d postgres"
+        echo "   Docker:           docker run --name postgres -e POSTGRES_PASSWORD=$DB_PASSWORD -p 5433:5432 -d postgres"
         echo ""
         exit 1
     fi
@@ -538,7 +538,7 @@ else ifneq (,$(wildcard ./.env))
 endif
 
 # Fallback database URL if not set in environment
-DATABASE_URL ?= postgresql://postgres:password@localhost:5432/oil_gas_inventory
+DATABASE_URL ?= postgresql://postgres:postgres123@localhost:5433/oil_gas_inventory_local
 
 .PHONY: help setup-phase35 migrate-phase35 seed-tenants db-status env-info debug-migrations
 
@@ -652,7 +652,7 @@ else ifneq (,$(wildcard ./.env))
 endif
 
 # Fallback database URL if not set in environment
-DATABASE_URL ?= postgresql://postgres:password@localhost:5432/oil_gas_inventory
+DATABASE_URL ?= postgresql://postgres:password@localhost:5434/oil_gas_inventory
 
 .PHONY: help setup-phase35 migrate-phase35 seed-tenants db-status env-info
 

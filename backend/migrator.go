@@ -36,7 +36,7 @@ func main() {
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		// ENFORCED: Use consistent database name in fallback
-		databaseURL = "postgresql://postgres:postgres123@localhost:5432/oil_gas_inventory?sslmode=disable"
+		databaseURL = "postgresql://postgres:postgres123@localhost:5433/oilgas_inventory_local?sslmode=disable"
 		fmt.Println("⚠️  Using fallback DATABASE_URL with consistent naming")
 	}
 
@@ -44,7 +44,7 @@ func main() {
 	if !contains(databaseURL, "oil_gas_inventory") {
 		fmt.Printf("🔧 Database URL correction needed. Current: %s\n", databaseURL)
 		// Force consistent database name
-		databaseURL = "postgresql://postgres:postgres123@localhost:5432/oil_gas_inventory?sslmode=disable"
+		databaseURL = "postgresql://postgres:postgres123@localhost:5433/oilgas_inventory_local?sslmode=disable"
 		fmt.Printf("🔧 Corrected to: %s\n", databaseURL)
 	}
 

@@ -25,7 +25,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	// Use DATABASE_URL from environment, fallback to test database
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
 	if databaseURL == "" {
-		databaseURL = "postgres://postgres:password@localhost:5432/oilgas_test?sslmode=disable"
+		databaseURL = "postgresql://postgres:password@localhost:5433/oilgas_inventory_test?sslmode=disable"
 		t.Logf("Using fallback test database URL")
 	} else {
 		t.Logf("Using test database derived from TEST_DATABASE_URL")

@@ -14,8 +14,8 @@ ifneq (,$(findstring postgres://,$(DATABASE_URL)))
 endif
 
 # Configuration
-DATABASE_URL ?= postgresql://postgres:password@localhost:5432/oil_gas_inventory
-TEST_DATABASE_URL ?= postgresql://postgres:password@localhost:5432/oil_gas_inventory_test
+DATABASE_URL ?= postgresql://postgres:password@localhost:5433/oilgas_inventory_local
+TEST_DATABASE_URL ?= postgresql://postgres:test123@localhost:5434/oilgas_inventory_test
 TOOLS_DIR := tools
 BACKEND_DIR := backend
 FRONTEND_DIR := frontend
@@ -900,3 +900,8 @@ commands: ## List all available commands
 # =============================================================================
 # END OF MAKEFILE
 # =============================================================================
+
+# Module includes added by fix_makefile_conflicts.sh
+include make/compatibility.mk
+include make/api.mk
+include make/data.mk

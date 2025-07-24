@@ -99,8 +99,8 @@ db-health: ## Check health of both databases
 # Development workflow helpers
 dev-setup: docker-up migrate-local seed-local ## Complete development setup
 	@echo "$(GREEN)✅ Development environment ready$(RESET)"
-	@echo "$(BLUE)Local database: localhost:5432$(RESET)"
-	@echo "$(BLUE)Test database: localhost:5433$(RESET)"
+	@echo "$(BLUE)Local database: localhost:5433$(RESET)"
+	@echo "$(BLUE)Test database: localhost:5434$(RESET)"
 
 test-setup: docker-up test-db-setup ## Setup for running tests
 	@echo "$(GREEN)✅ Test environment ready$(RESET)"

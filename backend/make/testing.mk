@@ -29,7 +29,7 @@ test-db-setup: ## Setup test database
 	@echo "$(GREEN)Setting up test database...$(RESET)"
 	@if [ -z "$TEST_DATABASE_URL" ]; then \
 		echo "$(YELLOW)TEST_DATABASE_URL not set, using default...$(RESET)"; \
-		export TEST_DATABASE_URL="postgresql://postgres:password@localhost:5432/oil_gas_test?sslmode=disable"; \
+		export TEST_DATABASE_URL="postgresql://postgres:password@localhost:5434/oilgas_inventory_test?sslmode=disable"; \
 	fi
 	@echo "$(GREEN)✅ Test database ready$(RESET)"
 

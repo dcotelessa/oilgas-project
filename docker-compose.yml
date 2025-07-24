@@ -1,21 +1,70 @@
+# docker-compose.yml
 services:
-  postgres:
+  # Local development database (with your converted MDB data)
+  postgres-local:
     image: postgres:15
+    container_name: oilgas-postgres-local
     environment:
-      POSTGRES_DB: oil_gas_inventory
+      POSTGRES_DB: oilgas_inventory_local
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres123
     ports:
-      - "5432:5432"
+      - "5433:5432"  # Standard port for local dev
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_local_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d/migrations:ro
+    networks:
+      - oilgas-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "pg_isready -U postgres -d oilgas_invenmtory_local"]
+      interval: 10s
+      timeout: 5s
       retries: 5
 
-volumes:
-  postgres_data:
+  # Test database (clean, for running tests)  
+  postgres-test:
+    image: postgres:15
+    container_name: oilgas-postgres-test
+    environment:
+      POSTGRES_DB: oilgas_inventory_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test123
+    ports:
+      - "5434:5432"  # Different port for test
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d/migrations:ro
+    networks:
+      - oilgas-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d oilgas_inventory_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # PgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: oilgas-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@oilgas.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "8080:80"
+    depends_on:
+      - postgres-local
+      - postgres-test
+    networks:
+      - oilgas-network
+    profiles:
+      - admin  # Optional service, start with: docker-compose --profile admin up
+
+volumes:
+  postgres_local_data:
+    driver: local
+  postgres_test_data:
+    driver: local
+
+networks:
+  oilgas-network:
+    driver: bridge

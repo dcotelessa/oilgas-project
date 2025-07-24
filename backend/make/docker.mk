@@ -3,14 +3,14 @@
 
 docker-up: ## Start both local and test databases
 	@echo "$(GREEN)Starting PostgreSQL databases...$(RESET)"
-	@docker-compose up -d postgres-local postgres-test
+	@docker-compose up -d postgres-local postgres-test --remove-orphans
 	@echo "$(BLUE)Waiting for databases to be ready...$(RESET)"
 	@sleep 5
 	@docker-compose exec postgres-local pg_isready -U postgres || echo "Local DB starting..."
 	@docker-compose exec postgres-test pg_isready -U postgres || echo "Test DB starting..."
 	@echo "$(GREEN)✅ Databases started$(RESET)"
-	@echo "$(BLUE)Local DB: localhost:5432$(RESET)"
-	@echo "$(BLUE)Test DB:  localhost:5433$(RESET)"
+	@echo "$(BLUE)Local DB: localhost:5433$(RESET)"
+	@echo "$(BLUE)Test DB:  localhost:5434$(RESET)"
 
 docker-up-admin: ## Start databases + PgAdmin
 	@echo "$(GREEN)Starting PostgreSQL databases with PgAdmin...$(RESET)"
@@ -20,8 +20,8 @@ docker-up-admin: ## Start databases + PgAdmin
 	@docker-compose exec postgres-local pg_isready -U postgres || echo "Local DB starting..."
 	@docker-compose exec postgres-test pg_isready -U postgres || echo "Test DB starting..."
 	@echo "$(GREEN)✅ All services started$(RESET)"
-	@echo "$(BLUE)Local DB:  localhost:5432$(RESET)"
-	@echo "$(BLUE)Test DB:   localhost:5433$(RESET)"
+	@echo "$(BLUE)Local DB:  localhost:5433$(RESET)"
+	@echo "$(BLUE)Test DB:   localhost:5434$(RESET)"
 	@echo "$(BLUE)PgAdmin:   http://localhost:8080$(RESET)"
 	@echo "$(YELLOW)PgAdmin Login: admin@oilgas.local / admin123$(RESET)"
 
@@ -34,7 +34,7 @@ docker-status: ## Show status of all containers
 	@docker-compose ps
 	@echo ""
 	@echo "$(BLUE)Database Health Check:$(RESET)"
-	@docker-compose exec postgres-local pg_isready -U postgres -d oilgas_inventory 2>/dev/null && echo "✅ Local DB: Ready" || echo "❌ Local DB: Not ready"
+	@docker-compose exec postgres-local pg_isready -U postgres -d oilgas_inventory_local 2>/dev/null && echo "✅ Local DB: Ready" || echo "❌ Local DB: Not ready"
 	@docker-compose exec postgres-test pg_isready -U postgres -d oilgas_inventory_test 2>/dev/null && echo "✅ Test DB: Ready" || echo "❌ Test DB: Not ready"
 
 docker-restart: ## Restart both databases
@@ -81,14 +81,14 @@ docker-shell-test: ## Open shell in test database container
 docker-backup-local: ## Backup local database
 	@echo "$(GREEN)Creating backup of local database...$(RESET)"
 	@mkdir -p backups
-	@docker-compose exec postgres-local pg_dump -U postgres oilgas_inventory > backups/local_$(shell date +%Y%m%d_%H%M%S).sql
+	@docker-compose exec postgres-local pg_dump -U postgres oilgas_inventory_local > backups/local_$(shell date +%Y%m%d_%H%M%S).sql
 	@echo "$(GREEN)✅ Backup created in backups/ directory$(RESET)"
 
 docker-restore-local: ## Restore local database from backup
 	@echo "$(GREEN)Available backups:$(RESET)"
 	@ls -la backups/*.sql 2>/dev/null || echo "No backups found"
 	@read -p "Enter backup filename: " backup && \
-	docker-compose exec -T postgres-local psql -U postgres -d oilgas_inventory < backups/$$backup
+	docker-compose exec -T postgres-local psql -U postgres -d oilgas_inventory_local < backups/$$backup
 
 # Network and volume management
 docker-network-info: ## Show Docker network information

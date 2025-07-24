@@ -14,7 +14,7 @@ import (
 func SetupTestDB(t testing.TB) *pgxpool.Pool {
 	testDatabaseURL := os.Getenv("TEST_DATABASE_URL")
 	if testDatabaseURL == "" {
-		testDatabaseURL = "postgresql://postgres:password@localhost:5432/oil_gas_test?sslmode=disable"
+		testDatabaseURL = "postgresql://postgres:password@localhost:5433/oilgas_inventory_test?sslmode=disable"
 	}
 
 	config, err := pgxpool.ParseConfig(testDatabaseURL)
