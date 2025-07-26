@@ -2,78 +2,86 @@
 package middleware
 
 import (
+	"database/sql"
+	"fmt"
 	"net/http"
-	
+	"os"
+	"strings"
+
 	"github.com/gin-gonic/gin"
-	"oilgas-backend/internal/models"
-	"oilgas-backend/internal/repository"
-	"oilgas-backend/internal/tenant"
+	_ "github.com/lib/pq"
 )
 
-type TenantMiddleware struct {
-	authRepo  *repository.AuthRepository
-	dbManager *tenant.DatabaseManager
-}
-
-func NewTenantMiddleware(authRepo *repository.AuthRepository, dbManager *tenant.DatabaseManager) *TenantMiddleware {
-	return &TenantMiddleware{
-		authRepo:  authRepo,
-		dbManager: dbManager,
-	}
-}
-
-func (tm *TenantMiddleware) RequireAuth() gin.HandlerFunc {
+// TenantMiddleware adds tenant routing to API endpoints
+func TenantMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get session ID from header
-		sessionID := c.GetHeader("X-Session-ID")
-		if sessionID == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "session required"})
+		tenantID := c.GetHeader("X-Tenant")
+		if tenantID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "X-Tenant header required",
+				"message": "Please provide tenant ID in X-Tenant header",
+			})
 			c.Abort()
 			return
 		}
-		
-		// Get tenant code from header
-		tenantCode := c.GetHeader("X-Tenant")
-		if tenantCode == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "tenant required"})
+
+		// Validate tenant ID format
+		if !isValidTenantID(tenantID) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid tenant ID format",
+				"message": "Tenant ID must contain only lowercase letters, numbers, and underscores",
+			})
 			c.Abort()
 			return
 		}
-		
-		// Validate tenant
-		tenant, err := tm.authRepo.GetTenantByCode(tenantCode)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tenant"})
+
+		// Verify tenant database exists
+		if !tenantDatabaseExists(tenantID) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Tenant not found",
+				"message": fmt.Sprintf("Tenant database 'oilgas_%s' does not exist", tenantID),
+			})
 			c.Abort()
 			return
 		}
-		
-		// Get tenant database connection
-		tenantDB, err := tm.dbManager.GetConnection(tenant.DatabaseName)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "database connection failed"})
-			c.Abort()
-			return
-		}
-		
-		// Store in context for handlers
-		c.Set("tenant", tenant)
-		c.Set("tenantDB", tenantDB)
+
+		// Store tenant info in context
+		c.Set("tenant_id", tenantID)
+		c.Set("tenant_db", fmt.Sprintf("oilgas_%s", tenantID))
 		c.Next()
 	}
 }
 
-// Helper functions to get from context
-func GetTenantDB(c *gin.Context) *sql.DB {
-	if db, exists := c.Get("tenantDB"); exists {
-		return db.(*sql.DB)
+func isValidTenantID(tenantID string) bool {
+	if len(tenantID) < 2 || len(tenantID) > 20 {
+		return false
 	}
-	return nil
+
+	for _, char := range tenantID {
+		if !((char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '_') {
+			return false
+		}
+	}
+
+	return true
 }
 
-func GetTenant(c *gin.Context) *models.Tenant {
-	if tenant, exists := c.Get("tenant"); exists {
-		return tenant.(*models.Tenant)
+func tenantDatabaseExists(tenantID string) bool {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return false
 	}
-	return nil
+
+	db, err := sql.Open("postgres", databaseURL)
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+
+	var exists bool
+	dbName := fmt.Sprintf("oilgas_%s", tenantID)
+	query := `SELECT EXISTS(SELECT datname FROM pg_catalog.pg_database WHERE datname = $1)`
+	err = db.QueryRow(query, dbName).Scan(&exists)
+	
+	return err == nil && exists
 }
