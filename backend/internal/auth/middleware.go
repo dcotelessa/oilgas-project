@@ -2,8 +2,8 @@
 package auth
 
 import (
+	"database/sql"
 	"net/http"
-	"sql"
 	
 	"github.com/gin-gonic/gin"
 	"oilgas-backend/internal/tenant"
