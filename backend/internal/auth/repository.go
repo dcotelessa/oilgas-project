@@ -5,6 +5,8 @@ package auth
 import (
 	"database/sql"
 	"fmt"
+
+	"oilgas-backend/internal/models"
 )
 
 type AuthRepository struct {

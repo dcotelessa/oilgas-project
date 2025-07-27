@@ -5,55 +5,53 @@ import (
 	"net/http"
 	
 	"github.com/gin-gonic/gin"
-	"oilgas-backend/internal/services"
+	"oilgas-backend/internal/auth"
+	"oilgas-backend/internal/models"
 )
 
 type AuthHandler struct {
-	authService *services.AuthService
+	authService    *auth.Service
+	sessionManager *auth.TenantSessionManager
 }
 
-func NewAuthHandler(authService *services.AuthService) *AuthHandler {
+func NewAuthHandler(sessionManager *auth.TenantSessionManager) *AuthHandler {
 	return &AuthHandler{
-		authService: authService,
+		authService:    auth.NewService(),
+		sessionManager: sessionManager,
 	}
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
-	var loginRequest struct {
-		Email    string `json:"email" binding:"required"`
-		Password string `json:"password" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&loginRequest); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+	var req models.LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	user, tenants, sessionID, err := h.authService.AuthenticateUser(loginRequest.Email, loginRequest.Password)
+	
+	response, err := h.authService.Login(c.Request.Context(), &req)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"user":       user,
-		"tenants":    tenants,
-		"session_id": sessionID,
-	})
+	
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	// TODO: Invalidate session
-	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	sessionID := c.GetHeader("Authorization")
+	if sessionID != "" {
+		h.sessionManager.DeleteSession(c.Request.Context(), sessionID)
+	}
+	
+	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 }
 
-func (h *AuthHandler) GetUserTenants(c *gin.Context) {
-	sessionID := c.GetHeader("X-Session-ID")
-	if sessionID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Session required"})
+func (h *AuthHandler) Me(c *gin.Context) {
+	// Get user from context (set by middleware)
+	if user, exists := c.Get("user"); exists {
+		c.JSON(http.StatusOK, gin.H{"user": user})
 		return
 	}
-
-	// TODO: Get user from session and return their tenants
-	c.JSON(http.StatusOK, gin.H{"message": "User tenants endpoint"})
+	
+	c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
 }

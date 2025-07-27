@@ -4,61 +4,62 @@ package handlers
 import (
 	"net/http"
 	"strconv"
-
+	
 	"github.com/gin-gonic/gin"
-	"oilgas-backend/internal/services"
 )
 
 type CustomerHandler struct {
-	service *services.CustomerService
+	// Will integrate with repository layer later
 }
 
-func NewCustomerHandler(service *services.CustomerService) *CustomerHandler {
-	return &CustomerHandler{service: service}
+func NewCustomerHandler() *CustomerHandler {
+	return &CustomerHandler{}
 }
 
 func (h *CustomerHandler) GetCustomers(c *gin.Context) {
-	customers, err := h.service.GetAllCustomers(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	tenantID := c.GetString("tenant_id")
+	
+	// Mock data for now - will integrate with repository
+	customers := []map[string]interface{}{
+		{
+			"id":       1,
+			"name":     "Sample Oil Company",
+			"email":    "contact@sampleoil.com",
+			"tenant_id": tenantID,
+		},
+		{
+			"id":       2,
+			"name":     "Demo Gas Corp",
+			"email":    "info@demogas.com", 
+			"tenant_id": tenantID,
+		},
 	}
-	c.JSON(http.StatusOK, gin.H{"customers": customers})
+	
+	c.JSON(http.StatusOK, gin.H{
+		"customers": customers,
+		"count":     len(customers),
+		"tenant":    tenantID,
+	})
 }
 
 func (h *CustomerHandler) GetCustomer(c *gin.Context) {
-	idStr := c.Param("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid customer ID"})
 		return
 	}
-
-	customer, err := h.service.GetCustomerByID(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	
+	tenantID := c.GetString("tenant_id")
+	
+	// Mock customer data
+	customer := map[string]interface{}{
+		"id":       id,
+		"name":     "Sample Oil Company",
+		"email":    "contact@sampleoil.com",
+		"tenant_id": tenantID,
+		"address":  "123 Oil Field Road",
+		"phone":    "(555) 123-4567",
 	}
-	if customer == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "customer not found"})
-		return
-	}
-
+	
 	c.JSON(http.StatusOK, gin.H{"customer": customer})
-}
-
-func (h *CustomerHandler) SearchCustomers(c *gin.Context) {
-	query := c.Query("q")
-	if query == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "search query is required"})
-		return
-	}
-
-	customers, err := h.service.SearchCustomers(c.Request.Context(), query)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"customers": customers})
 }

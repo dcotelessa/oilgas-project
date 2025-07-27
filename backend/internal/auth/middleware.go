@@ -7,6 +7,7 @@ import (
 	
 	"github.com/gin-gonic/gin"
 	"oilgas-backend/internal/tenant"
+	"oilgas-backend/internal/models"
 )
 
 type TenantMiddleware struct {

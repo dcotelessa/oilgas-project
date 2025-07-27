@@ -1,8 +1,8 @@
 // backend/cmd/server/main.go
-// Enhanced API server with tenant-aware routing and handlers
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
-	
-	// Import your new internal packages
-	"oilgas-backend/internal/middleware"
+
+	"oilgas-backend/internal/auth"
 	"oilgas-backend/internal/handlers"
-	"oilgas-backend/internal/database"
+	"oilgas-backend/internal/middleware"
+	"oilgas-backend/pkg/cache"
 )
 
 func main() {
@@ -24,103 +25,139 @@ func main() {
 		log.Printf("Warning: Could not load .env file: %v", err)
 	}
 
-	// Set Gin mode based on environment
+	// Set Gin mode
 	if os.Getenv("APP_ENV") == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	// Create Gin router with middleware
-	router := gin.New()
-	router.Use(gin.Logger())
-	router.Use(gin.Recovery())
+	// Initialize database
+	pool, err := initializeDatabase()
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer pool.Close()
 
-	// CORS middleware for development
-	router.Use(corsMiddleware())
+	// Initialize in-memory cache (no Redis dependency)
+	memCache := cache.NewWithDefaultExpiration(10*time.Minute, 5*time.Minute)
 
-	// Health check endpoint (no tenant required)
-	router.GET("/health", healthCheckHandler)
+	// Initialize components
+	sessionManager := auth.NewTenantSessionManager(pool, memCache)
 
-	// Root API info endpoint (no tenant required)
-	router.GET("/api", apiInfoHandler)
+	// Initialize handlers
+	authHandler := handlers.NewAuthHandler(sessionManager)
+	customerHandler := handlers.NewCustomerHandler()
+	inventoryHandler := handlers.NewInventoryHandler()
 
-	// API v1 routes with tenant middleware
-	setupAPIRoutes(router)
-
-	// Admin endpoints (for tenant management)
-	setupAdminRoutes(router)
-
-	// Graceful shutdown handler
-	defer database.CloseTenantConnections()
+	// Setup router
+	router := setupRouter(authHandler, customerHandler, inventoryHandler)
 
 	// Start server
-	startServer(router)
-}
+	port := os.Getenv("API_PORT")
+	if port == "" {
+		port = "8000"
+	}
 
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Tenant")
+	fmt.Printf("🚀 Oil & Gas Inventory API Server Starting\\n")
+	fmt.Printf("📋 Health check: http://localhost:%s/health\\n", port)
+	fmt.Printf("🔌 API base: http://localhost:%s/api/v1\\n", port)
+	fmt.Printf("🔐 Auth: Session-based with tenant isolation\\n")
+	fmt.Printf("💾 Cache: In-memory (%d items)\\n", memCache.Count())
 
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
+	if err := http.ListenAndServe(":"+port, router); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
 	}
 }
 
-func healthCheckHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "ok",
-		"timestamp": time.Now().Unix(),
-		"service":   "oil-gas-inventory-api",
-		"version":   "1.0.0",
-		"tenant_support": true,
-	})
+func initializeDatabase() (*pgxpool.Pool, error) {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		log.Printf("Warning: DATABASE_URL not set, some features will be limited")
+		return nil, nil // Allow server to start without DB for testing
+	}
+
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse database config: %w", err)
+	}
+
+	// Optimized connection pool settings
+	config.MaxConns = 25
+	config.MinConns = 5
+	config.MaxConnLifetime = 30 * time.Minute
+	config.MaxConnIdleTime = 5 * time.Minute
+
+	pool, err := pgxpool.NewWithConfig(context.Background(), config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connection pool: %w", err)
+	}
+
+	if err := pool.Ping(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	log.Printf("✅ Database connected with %d max connections", config.MaxConns)
+	return pool, nil
 }
 
-func apiInfoHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Oil & Gas Inventory API",
-		"version": "1.0.0",
-		"docs":    "Add X-Tenant header to access tenant-specific endpoints",
-		"examples": gin.H{
-			"customers": "curl -H 'X-Tenant: longbeach' '/api/v1/customers'",
-			"search":    "curl -H 'X-Tenant: longbeach' '/api/v1/search?q=oil'",
-			"inventory": "curl -H 'X-Tenant: longbeach' '/api/v1/inventory?customer_id=123'",
-		},
-		"tenant_commands": gin.H{
-			"create": "migrator tenant-create <tenant_id>",
-			"list":   "migrator tenant-list",
-			"status": "migrator tenant-status <tenant_id>",
-		},
-	})
-}
+func setupRouter(authHandler *handlers.AuthHandler, customerHandler *handlers.CustomerHandler, inventoryHandler *handlers.InventoryHandler) *gin.Engine {
+	router := gin.New()
+	router.Use(gin.Logger())
+	router.Use(gin.Recovery())
+	router.Use(middleware.CORS())
 
-func setupAPIRoutes(router *gin.Engine) {
-	// All v1 routes require tenant middleware
+	// Health check (no tenant required)
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status":     "ok",
+			"timestamp":  time.Now().Unix(),
+			"service":    "oil-gas-inventory-api",
+			"version":    "1.0.0",
+			"features": []string{
+				"tenant-isolation",
+				"session-auth",
+				"in-memory-cache",
+			},
+		})
+	})
+
+	// API info (no tenant required)
+	router.GET("/api", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Oil & Gas Inventory API",
+			"version": "1.0.0",
+			"docs":    "Add X-Tenant header to access tenant-specific endpoints",
+			"examples": gin.H{
+				"customers": "curl -H 'X-Tenant: demo' '/api/v1/customers'",
+				"inventory": "curl -H 'X-Tenant: demo' '/api/v1/inventory'",
+			},
+		})
+	})
+
+	// API routes
 	v1 := router.Group("/api/v1")
-	v1.Use(middleware.TenantMiddleware())
+	
+	// Authentication endpoints (public)
+	auth := v1.Group("/auth")
 	{
-		// Customer endpoints
-		v1.GET("/customers", handlers.GetCustomers)
-		v1.GET("/customers/:id", handlers.GetCustomer)
+		auth.POST("/login", authHandler.Login)
+		auth.POST("/logout", authHandler.Logout)
+	}
 
-		// Inventory endpoints
-		v1.GET("/inventory", handlers.GetInventory)
-		v1.GET("/inventory/:id", handlers.GetInventoryItem)
-
-		// Work order endpoints
-		v1.GET("/work-orders", handlers.GetWorkOrders)
-		v1.GET("/work-orders/:id", handlers.GetWorkOrder)
-
-		// Search endpoints
-		v1.GET("/search", handlers.GlobalSearch)
-
-		// Tenant status endpoint
-		v1.GET("/status", func(c *gin.Context) {
+	// Protected endpoints (require tenant)
+	protected := v1.Group("")
+	protected.Use(middleware.TenantMiddleware())
+	{
+		// Auth endpoints
+		protected.GET("/auth/me", authHandler.Me)
+		
+		// Business endpoints
+		protected.GET("/customers", customerHandler.GetCustomers)
+		protected.GET("/customers/:id", customerHandler.GetCustomer)
+		protected.GET("/inventory", inventoryHandler.GetInventory)
+		protected.GET("/inventory/:id", inventoryHandler.GetInventoryItem)
+		
+		// Status endpoint
+		protected.GET("/status", func(c *gin.Context) {
 			tenantID := c.GetString("tenant_id")
 			c.JSON(http.StatusOK, gin.H{
 				"tenant":    tenantID,
@@ -128,78 +165,12 @@ func setupAPIRoutes(router *gin.Engine) {
 				"status":    "active",
 				"timestamp": time.Now().Unix(),
 				"endpoints": gin.H{
-					"customers": fmt.Sprintf("/api/v1/customers"),
-					"inventory": fmt.Sprintf("/api/v1/inventory"),
-					"search":    fmt.Sprintf("/api/v1/search?q=<term>"),
-					"work_orders": fmt.Sprintf("/api/v1/work-orders"),
+					"customers": "/api/v1/customers",
+					"inventory": "/api/v1/inventory",
 				},
 			})
 		})
 	}
-}
 
-func setupAdminRoutes(router *gin.Engine) {
-	// Admin endpoints (no tenant required, but could add auth later)
-	admin := router.Group("/admin")
-	{
-		// Tenant management
-		admin.GET("/tenants", func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{
-				"message": "Tenant management endpoint",
-				"note":    "Use migrator commands for tenant operations",
-				"commands": gin.H{
-					"list":   "migrator tenant-list",
-					"create": "migrator tenant-create <id>",
-					"status": "migrator tenant-status <id>",
-				},
-			})
-		})
-
-		// System health
-		admin.GET("/health", func(c *gin.Context) {
-			// Get connection pool stats
-			poolStats := database.GetConnectionPoolManager().GetAllConnectionStats()
-			
-			c.JSON(http.StatusOK, gin.H{
-				"status": "healthy",
-				"timestamp": time.Now().Unix(),
-				"connection_pools": poolStats,
-				"active_tenants": len(poolStats),
-			})
-		})
-
-		// Connection monitoring
-		admin.GET("/connections", func(c *gin.Context) {
-			database.GetConnectionPoolManager().MonitorConnectionPools()
-			
-			c.JSON(http.StatusOK, gin.H{
-				"message": "Connection monitoring logged",
-				"timestamp": time.Now().Unix(),
-			})
-		})
-	}
-}
-
-func startServer(router *gin.Engine) {
-	port := os.Getenv("APP_PORT")
-	if port == "" {
-		port = "8000"
-	}
-
-	fmt.Printf("🚀 Starting Oil & Gas Inventory API server on port %s\n", port)
-	fmt.Printf("📋 Health check: http://localhost:%s/health\n", port)
-	fmt.Printf("🔌 API info: http://localhost:%s/api\n", port)
-	fmt.Printf("🏢 Tenant API: http://localhost:%s/api/v1/customers (requires X-Tenant header)\n", port)
-	fmt.Printf("🔧 Admin panel: http://localhost:%s/admin/health\n", port)
-	fmt.Println()
-	fmt.Println("📖 Example tenant API calls:")
-	fmt.Printf("  curl -H 'X-Tenant: longbeach' 'http://localhost:%s/api/v1/customers'\n", port)
-	fmt.Printf("  curl -H 'X-Tenant: longbeach' 'http://localhost:%s/api/v1/search?q=oil'\n", port)
-	fmt.Printf("  curl -H 'X-Tenant: longbeach' 'http://localhost:%s/api/v1/inventory?customer_id=123'\n", port)
-	fmt.Println()
-	fmt.Println("🏗️  Create tenants with:")
-	fmt.Println("  go run migrator.go tenant-create <tenant_id>")
-	fmt.Println("  go run migrator.go tenant-list")
-
-	log.Fatal(http.ListenAndServe(":"+port, router))
+	return router
 }

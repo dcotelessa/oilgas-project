@@ -1,8 +1,6 @@
 package config
 
 import (
-	"database/sql"
-	"fmt"
 	"os"
 )
 

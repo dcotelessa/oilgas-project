@@ -1,3 +1,4 @@
+// backend/internal/auth/service.go
 package auth
 
 import (
@@ -5,7 +6,11 @@ import (
 	"errors"
 	"time"
 	
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	
+	// Import models from centralized location
+	"oilgas-backend/internal/models"
 )
 
 var (
@@ -16,25 +21,25 @@ var (
 	ErrSessionExpired    = errors.New("session expired")
 )
 
-// Service handles authentication operations
+// Service handles authentication operations using centralized models
 type Service struct {
-	// In-memory stores for testing
-	users    map[string]*User    // email -> user
-	tenants  map[string]*Tenant  // slug -> tenant
-	sessions map[string]*Session // session_id -> session
+	// In-memory stores for testing - will be replaced with database repo
+	users    map[string]*models.User    // email -> user
+	tenants  map[string]*models.Tenant  // slug -> tenant  
+	sessions map[string]*models.Session // session_id -> session
 }
 
 // NewService creates a new auth service
 func NewService() *Service {
 	return &Service{
-		users:    make(map[string]*User),
-		tenants:  make(map[string]*Tenant),
-		sessions: make(map[string]*Session),
+		users:    make(map[string]*models.User),
+		tenants:  make(map[string]*models.Tenant),
+		sessions: make(map[string]*models.Session),
 	}
 }
 
-// CreateUser creates a new user
-func (s *Service) CreateUser(ctx context.Context, req *CreateUserRequest) (*User, error) {
+// CreateUser creates a new user with UUID
+func (s *Service) CreateUser(ctx context.Context, req *models.CreateUserRequest) (*models.User, error) {
 	if _, exists := s.users[req.Email]; exists {
 		return nil, ErrUserExists
 	}
@@ -50,17 +55,33 @@ func (s *Service) CreateUser(ctx context.Context, req *CreateUserRequest) (*User
 		return nil, err
 	}
 	
-	user := &User{
-		ID:           len(s.users) + 1, // Simple ID generation for testing
-		Email:        req.Email,
-		Username:     req.Email, // Use email as username for now
-		PasswordHash: passwordHash,
-		Role:         req.Role,
-		Company:      req.Company,
-		TenantID:     req.TenantID,
-		Active:       true,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+	// Generate new UUID for user
+	userID := uuid.New()
+	
+	firstName := &req.FirstName
+	lastName := &req.LastName
+	if req.FirstName == "" {
+		firstName = nil
+	}
+	if req.LastName == "" {
+		lastName = nil
+	}
+	
+	user := &models.User{
+		ID:            userID,
+		Email:         req.Email,
+		Username:      req.Email, // Use email as username
+		FirstName:     firstName,
+		LastName:      lastName,
+		PasswordHash:  passwordHash,
+		Role:          req.Role,
+		Company:       req.Company,
+		TenantID:      req.TenantID,
+		Active:        true,
+		EmailVerified: true, // Auto-verify for demo
+		Settings:      make(map[string]interface{}),
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 	
 	s.users[req.Email] = user
@@ -68,7 +89,7 @@ func (s *Service) CreateUser(ctx context.Context, req *CreateUserRequest) (*User
 }
 
 // GetUser retrieves a user by email
-func (s *Service) GetUser(ctx context.Context, email string) (*User, error) {
+func (s *Service) GetUser(ctx context.Context, email string) (*models.User, error) {
 	user, exists := s.users[email]
 	if !exists {
 		return nil, ErrUserNotFound
@@ -77,7 +98,7 @@ func (s *Service) GetUser(ctx context.Context, email string) (*User, error) {
 }
 
 // Login authenticates a user and creates a session
-func (s *Service) Login(ctx context.Context, req *LoginRequest) (*LoginResponse, error) {
+func (s *Service) Login(ctx context.Context, req *models.LoginRequest) (*models.LoginResponse, error) {
 	user, exists := s.users[req.Email]
 	if !exists {
 		return nil, ErrInvalidCredentials
@@ -95,11 +116,11 @@ func (s *Service) Login(ctx context.Context, req *LoginRequest) (*LoginResponse,
 	}
 	
 	// Create session
-	session := &Session{
+	session := &models.Session{
 		ID:           generateSessionID(),
-		UserID:       user.ID,
+		UserID:       user.ID, // UUID
 		TenantID:     user.TenantID,
-		ExpiresAt:    time.Now().Add(24 * time.Hour), // 24 hour sessions
+		ExpiresAt:    time.Now().Add(24 * time.Hour),
 		CreatedAt:    time.Now(),
 		LastActivity: time.Now(),
 	}
@@ -111,7 +132,7 @@ func (s *Service) Login(ctx context.Context, req *LoginRequest) (*LoginResponse,
 	user.LastLogin = &now
 	user.UpdatedAt = now
 	
-	return &LoginResponse{
+	return &models.LoginResponse{
 		User:      user,
 		Tenant:    tenant,
 		SessionID: session.ID,
@@ -120,7 +141,7 @@ func (s *Service) Login(ctx context.Context, req *LoginRequest) (*LoginResponse,
 }
 
 // ValidateSession checks if a session is valid
-func (s *Service) ValidateSession(ctx context.Context, sessionID string) (*User, *Tenant, error) {
+func (s *Service) ValidateSession(ctx context.Context, sessionID string) (*models.User, *models.Tenant, error) {
 	session, exists := s.sessions[sessionID]
 	if !exists {
 		return nil, nil, ErrSessionExpired
@@ -147,19 +168,22 @@ func (s *Service) ValidateSession(ctx context.Context, sessionID string) (*User,
 	return user, tenant, nil
 }
 
-// CreateTenant creates a new tenant
-func (s *Service) CreateTenant(ctx context.Context, name, slug string) (*Tenant, error) {
+// CreateTenant creates a new tenant with UUID
+func (s *Service) CreateTenant(ctx context.Context, name, slug string) (*models.Tenant, error) {
 	if _, exists := s.tenants[slug]; exists {
 		return nil, errors.New("tenant already exists")
 	}
 	
-	tenant := &Tenant{
-		ID:           len(s.tenants) + 1,
+	// Generate new UUID for tenant
+	tenantID := uuid.New()
+	
+	dbName := "oilgas_" + slug
+	tenant := &models.Tenant{
+		ID:           tenantID,
 		Name:         name,
 		Slug:         slug,
-		Code:         slug,
-		DatabaseName: "oilgas_" + slug,
 		DatabaseType: "tenant",
+		DatabaseName: &dbName,
 		Active:       true,
 		Settings:     make(map[string]interface{}),
 		CreatedAt:    time.Now(),
@@ -171,7 +195,7 @@ func (s *Service) CreateTenant(ctx context.Context, name, slug string) (*Tenant,
 }
 
 // Helper methods
-func (s *Service) getUserByID(id int) (*User, bool) {
+func (s *Service) getUserByID(id uuid.UUID) (*models.User, bool) {
 	for _, user := range s.users {
 		if user.ID == id {
 			return user, true
@@ -200,5 +224,5 @@ func CheckPassword(password, hash string) bool {
 }
 
 func generateSessionID() string {
-	return "sess_" + time.Now().Format("20060102150405") + "_" + time.Now().Format("000000")
+	return "sess_" + uuid.New().String()
 }

@@ -250,19 +250,13 @@ func (tp *TenantProcessor) generateValidationReport() error {
 	report += `## Import Instructions
 
 1. Create tenant database:
-   ```bash
    cd backend && go run migrator.go tenant-create ` + tp.TenantID + `
-   ```
 
 2. Import data:
-   ```bash
    psql oilgas_` + tp.TenantID + ` -f ` + filepath.Join(tp.TenantID, "import_script.sql") + `
-   ```
 
 3. Validate import:
-   ```bash
    cd backend && go run migrator.go tenant-status ` + tp.TenantID + `
-   ```
 
 ## Next Steps
 

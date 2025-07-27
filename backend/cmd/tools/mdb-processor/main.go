@@ -500,9 +500,7 @@ Output: %s
 Files are cleaned and normalized, ready for PostgreSQL import.
 
 Use command:
-\`\`\`bash
 make data-import TENANT=%s CSV_DIR=%s
-\`\`\`
 `, totalRows, mp.tenantCode, cleanCSVDir)
 
 	return os.WriteFile(reportFile, []byte(report), 0644)

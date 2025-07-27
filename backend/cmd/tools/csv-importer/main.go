@@ -1,7 +1,6 @@
 package main
 
 import (
-    "encoding/csv"
     "fmt"
     "os"
     "path/filepath"
@@ -24,14 +23,14 @@ func main() {
     
     // Connect to tenant database
     dbName := fmt.Sprintf("oilgas_%s", tenant)
-    // Use your existing database connection logic here
+    // TODO: Use your existing database connection logic here
     
     // Import CSV files from tools/ output
     files, _ := filepath.Glob(filepath.Join(csvDir, "*.csv"))
     
     for _, file := range files {
         fmt.Printf("Importing %s...\n", filepath.Base(file))
-        // Use your existing import logic here
+        // TODO: Use your existing import logic here
         // Import to tenant-specific database
     }
     
