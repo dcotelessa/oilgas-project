@@ -1,87 +1,121 @@
 # =============================================================================
-# API Development Commands
+# API MODULE - make/api.mk
+# =============================================================================
+# API server management, endpoints testing, and documentation
+
+.PHONY: api-setup api-dev api-build api-test api-docs
+
+# =============================================================================
+# API LIFECYCLE
 # =============================================================================
 
-.PHONY: api-start api-test api-test-quick api-dev api-logs api-examples api-curl-examples
+api-setup: ## 🛠️  Setup API environment
+	@echo "$(GREEN)🌐 Setting up API environment...$(RESET)"
+	@mkdir -p logs/api tmp/uploads
+	@echo "$(GREEN)✅ API environment ready$(RESET)"
 
-## Start API server in development mode
-api-start:
-	@echo "🚀 Starting API server..."
-	@echo "📋 Health: http://localhost:8000/health"
-	@echo "🔌 API: http://localhost:8000/api/v1"
-	@echo "Press Ctrl+C to stop"
+api-dev: ## 🛠️  Start development API server
+	@echo "$(GREEN)🚀 Starting API server...$(RESET)"
+	@echo "$(BLUE)API: http://localhost:$(API_PORT)$(RESET)"
+	@echo "$(BLUE)Health: http://localhost:$(API_PORT)/health$(RESET)"
+	@echo "$(BLUE)Admin: http://localhost:$(API_PORT)/admin/health$(RESET)"
 	@go run cmd/server/main.go
 
-## Test API integration with repository layer
-api-test:
-	@echo "🧪 Testing API integration..."
-	@chmod +x scripts/test_api_integration.sh
-	@scripts/test_api_integration.sh
+api-build: ## 🛠️  Build production API binary
+	@echo "$(YELLOW)🔨 Building production API binary...$(RESET)"
+	@CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bin/api-server cmd/server/main.go
+	@echo "$(GREEN)✅ Production binary built: bin/api-server$(RESET)"
 
-## Quick API health check
-api-test-quick:
-	@echo "⚡ Quick API test..."
-	@curl -s http://localhost:8000/health | jq -r '"Status: " + .status + " | Service: " + .service' 2>/dev/null || echo "❌ API not responding"
-	@curl -s http://localhost:8000/api/v1/status | jq -r '"Message: " + .message' 2>/dev/null || echo "❌ API not responding"
+api-run-prod: api-build ## 🛠️  Run production binary
+	@echo "$(GREEN)🚀 Starting production API server...$(RESET)"
+	@./bin/api-server
 
-## Start API in development mode with auto-reload
-api-dev:
-	@echo "🔄 Starting API with auto-reload..."
-	@echo "💡 Install 'air' for auto-reload: go install github.com/cosmtrek/air@latest"
-	@which air > /dev/null && air || $(MAKE) api-start
+# =============================================================================
+# API TESTING
+# =============================================================================
 
-## Show API server logs (if running in docker)
-api-logs:
-	@docker logs -f oil-gas-inventory-api 2>/dev/null || echo "API not running in docker"
+api-test: ## 🧪 Test API endpoints
+	@echo "$(YELLOW)🧪 Testing API endpoints...$(RESET)"
+	@go test -v ./internal/handlers/...
+	@echo "$(GREEN)✅ API endpoint tests complete$(RESET)"
 
-## Show API usage examples
-api-examples:
-	@echo "🔍 API Usage Examples"
-	@echo "===================="
-	@echo ""
-	@echo "Health Check:"
-	@echo "  curl http://localhost:8000/health"
-	@echo ""
-	@echo "Get All Customers:"
-	@echo "  curl http://localhost:8000/api/v1/customers | jq"
-	@echo ""
-	@echo "Search Customers:"
-	@echo "  curl 'http://localhost:8000/api/v1/customers/search?q=oil' | jq"
-	@echo ""
-	@echo "Get Customer by ID:"
-	@echo "  curl http://localhost:8000/api/v1/customers/1 | jq"
-	@echo ""
-	@echo "Get All Inventory:"
-	@echo "  curl http://localhost:8000/api/v1/inventory | jq"
-	@echo ""
-	@echo "Search Inventory:"
-	@echo "  curl 'http://localhost:8000/api/v1/inventory/search?q=5' | jq"
-	@echo ""
-	@echo "Reference Data:"
-	@echo "  curl http://localhost:8000/api/v1/grades | jq"
-	@echo "  curl http://localhost:8000/api/v1/sizes | jq"
+api-test-health: ## 🧪 Test health endpoint
+	@echo "$(YELLOW)🧪 Testing health endpoint...$(RESET)"
+	@curl -s http://localhost:$(API_PORT)/health | jq . || \
+		echo "$(RED)❌ Health endpoint failed$(RESET)"
 
-## Run live curl examples (requires API running)
-api-curl-examples:
-	@echo "🔗 Live API Examples"
+api-test-auth: ## 🧪 Test authentication endpoints
+	@echo "$(YELLOW)🧪 Testing authentication endpoints...$(RESET)"
+	@echo "Testing login endpoint..."
+	@curl -X POST http://localhost:$(API_PORT)/auth/login \
+		-H "Content-Type: application/json" \
+		-d '{"email":"test@example.com","password":"testpass"}' | jq .
+	@echo ""
+
+api-test-tenant: ## 🧪 Test tenant-aware endpoints
+	@echo "$(YELLOW)🧪 Testing tenant endpoints...$(RESET)"
+	@read -p "Tenant ID: " tenant && \
+	read -p "Session ID (from login): " session && \
+	echo "Testing customers endpoint..." && \
+	curl -H "X-Tenant: $$tenant" -H "X-Session-ID: $$session" \
+		"http://localhost:$(API_PORT)/api/v1/customers" | jq .
+
+api-benchmark: ## 📊 Benchmark API performance
+	@echo "$(YELLOW)📊 Benchmarking API performance...$(RESET)"
+	@go test -bench=. -benchmem ./internal/handlers/...
+
+# =============================================================================
+# API DOCUMENTATION
+# =============================================================================
+
+api-docs: ## 📖 Generate API documentation
+	@echo "$(YELLOW)📖 Generating API documentation...$(RESET)"
+	@if command -v swag >/dev/null 2>&1; then \
+		swag init -g cmd/server/main.go -o docs/swagger; \
+		echo "$(GREEN)✅ Swagger docs generated at docs/swagger$(RESET)"; \
+	else \
+		echo "$(YELLOW)💡 Install swag: go install github.com/swaggo/swag/cmd/swag@latest$(RESET)"; \
+		echo "$(BLUE)Generating basic docs...$(RESET)"; \
+		go run cmd/tools/generate-docs.go; \
+	fi
+
+api-docs-serve: ## 📖 Serve API documentation
+	@echo "$(BLUE)📖 Serving API documentation...$(RESET)"
+	@echo "$(BLUE)Docs: http://localhost:8080$(RESET)"
+	@if [ -d docs/swagger ]; then \
+		cd docs/swagger && python3 -m http.server 8080; \
+	else \
+		echo "$(YELLOW)💡 Generate docs first: make api-docs$(RESET)"; \
+	fi
+
+# =============================================================================
+# API UTILITIES
+# =============================================================================
+
+api-clean: ## 🛠️  Clean API artifacts
+	@echo "$(YELLOW)🧹 Cleaning API artifacts...$(RESET)"
+	@rm -rf bin/api-server
+	@rm -rf logs/api/*.log
+	@rm -rf tmp/uploads/*
+	@echo "$(GREEN)✅ API cleanup complete$(RESET)"
+
+help-api: ## 📖 Show API commands help
+	@echo "$(BLUE)API Module Commands$(RESET)"
 	@echo "==================="
 	@echo ""
-	@echo "1. Health Check:"
-	@curl -s http://localhost:8000/health | jq 2>/dev/null || echo "❌ API not responding"
+	@echo "$(GREEN)🛠️  LIFECYCLE:$(RESET)"
+	@echo "  api-setup        - Setup API environment"
+	@echo "  api-dev          - Start development server"
+	@echo "  api-build        - Build production binary"
+	@echo "  api-run-prod     - Run production binary"
 	@echo ""
-	@echo "2. Customer Count:"
-	@curl -s http://localhost:8000/api/v1/customers | jq '.count' 2>/dev/null || echo "❌ API not responding"
+	@echo "$(YELLOW)🧪 TESTING:$(RESET)"
+	@echo "  api-test         - Test API endpoints"
+	@echo "  api-test-health  - Test health endpoint"
+	@echo "  api-test-auth    - Test auth endpoints"
+	@echo "  api-test-tenant  - Test tenant endpoints"
+	@echo "  api-benchmark    - Benchmark performance"
 	@echo ""
-	@echo "3. Sample Customer:"
-	@curl -s http://localhost:8000/api/v1/customers | jq '.customers[0] // "No customers found"' 2>/dev/null || echo "❌ API not responding"
-	@echo ""
-	@echo "4. Inventory Count:"
-	@curl -s http://localhost:8000/api/v1/inventory | jq '.count' 2>/dev/null || echo "❌ API not responding"
-
-## Check if database is ready for API
-api-check-db:
-	@echo "🔍 Checking database readiness for API..."
-	@$(MAKE) db-health 2>/dev/null && echo "✅ Database accessible" || echo "❌ Database not accessible"
-	@echo "Sample data check:"
-	@$(MAKE) db-exec SQL="SELECT COUNT(*) as customers FROM store.customers;" 2>/dev/null || echo "❌ Cannot check customers table"
-	@$(MAKE) db-exec SQL="SELECT COUNT(*) as inventory FROM store.inventory;" 2>/dev/null || echo "❌ Cannot check inventory table"
+	@echo "$(BLUE)📖 DOCUMENTATION:$(RESET)"
+	@echo "  api-docs         - Generate documentation"
+	@echo "  api-docs-serve   - Serve documentation"
