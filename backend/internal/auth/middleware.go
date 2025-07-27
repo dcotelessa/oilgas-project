@@ -2,12 +2,11 @@
 package auth
 
 import (
-	"context"
 	"net/http"
-	"strings"
+	"sql"
 	
 	"github.com/gin-gonic/gin"
-	"your-project/internal/tenant"
+	"oilgas-backend/internal/tenant"
 )
 
 type TenantMiddleware struct {

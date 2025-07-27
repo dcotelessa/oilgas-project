@@ -9,7 +9,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"your-project/internal/database"
+	"oilgas-backend/internal/database"
 )
 
 // GetInventoryItem returns a specific inventory item by ID
