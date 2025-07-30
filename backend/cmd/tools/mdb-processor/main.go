@@ -84,16 +84,16 @@ var ColumnMapping = map[string]string{
 // Enhanced MDB processor combining Phase 1 logic with mdb-tools
 type MDBProcessor struct {
 	mdbFile     string
-	tenantCode  string
+	tenantSlug  string
 	outputDir   string
 	workingDir  string
 }
 
-func NewMDBProcessor(mdbFile, tenantCode, outputDir string) *MDBProcessor {
-	workingDir := filepath.Join(outputDir, fmt.Sprintf("working_%s", tenantCode))
+func NewMDBProcessor(mdbFile, tenantSlug, outputDir string) *MDBProcessor {
+	workingDir := filepath.Join(outputDir, fmt.Sprintf("working_%s", tenantSlug))
 	return &MDBProcessor{
 		mdbFile:    mdbFile,
-		tenantCode: tenantCode,
+		tenantSlug: tenantSlug,
 		outputDir:  outputDir,
 		workingDir: workingDir,
 	}
@@ -134,7 +134,7 @@ func NormalizeColumnName(colName string) string {
 
 // Enhanced MDB analysis with tenant context
 func (mp *MDBProcessor) AnalyzeMDB() error {
-	fmt.Printf("🔍 Analyzing MDB file for tenant: %s\n", mp.tenantCode)
+	fmt.Printf("🔍 Analyzing MDB file for tenant: %s\n", mp.tenantSlug)
 	fmt.Printf("📁 Source: %s\n", mp.mdbFile)
 	
 	// Extract table list using mdb-tools
@@ -166,7 +166,7 @@ func (mp *MDBProcessor) AnalyzeMDB() error {
 	
 	fmt.Printf("\n📊 Analysis Summary:\n")
 	fmt.Printf("  Tables to process: %d\n", len(cleanTables))
-	fmt.Printf("  Tenant: %s\n", mp.tenantCode)
+	fmt.Printf("  Tenant: %s\n", mp.tenantSlug)
 	fmt.Printf("  Ready for extraction: ✅\n")
 	
 	return nil
@@ -221,7 +221,7 @@ func (mp *MDBProcessor) analyzeTable(tableName string) error {
 
 // Complete MDB to clean CSV pipeline
 func (mp *MDBProcessor) ProcessComplete() error {
-	fmt.Printf("🚀 Starting complete MDB processing pipeline for tenant: %s\n", mp.tenantCode)
+	fmt.Printf("🚀 Starting complete MDB processing pipeline for tenant: %s\n", mp.tenantSlug)
 	
 	// Step 1: Create working directories
 	if err := os.MkdirAll(mp.workingDir, 0755); err != nil {
@@ -250,7 +250,7 @@ func (mp *MDBProcessor) ProcessComplete() error {
 	}
 	
 	// Step 5: Move final files to output
-	finalDir := filepath.Join(mp.outputDir, fmt.Sprintf("tenant_%s_processed", mp.tenantCode))
+	finalDir := filepath.Join(mp.outputDir, fmt.Sprintf("tenant_%s_processed", mp.tenantSlug))
 	if err := os.MkdirAll(finalDir, 0755); err != nil {
 		return err
 	}
@@ -448,7 +448,7 @@ func (mp *MDBProcessor) processCSVFile(inputFile, outputFile string) error {
 }
 
 func (mp *MDBProcessor) generateReport(cleanCSVDir string) error {
-	reportFile := filepath.Join(mp.outputDir, fmt.Sprintf("processing_report_%s.md", mp.tenantCode))
+	reportFile := filepath.Join(mp.outputDir, fmt.Sprintf("processing_report_%s.md", mp.tenantSlug))
 	
 	report := fmt.Sprintf(`# MDB Processing Report - Tenant: %s
 
@@ -458,7 +458,7 @@ Output: %s
 
 ## Processing Summary
 
-`, mp.tenantCode, time.Now().Format("2006-01-02 15:04:05"), mp.mdbFile, cleanCSVDir)
+`, mp.tenantSlug, time.Now().Format("2006-01-02 15:04:05"), mp.mdbFile, cleanCSVDir)
 
 	// Analyze processed files
 	entries, err := os.ReadDir(cleanCSVDir)
@@ -501,7 +501,7 @@ Files are cleaned and normalized, ready for PostgreSQL import.
 
 Use command:
 make data-import TENANT=%s CSV_DIR=%s
-`, totalRows, mp.tenantCode, cleanCSVDir)
+`, totalRows, mp.tenantSlug, cleanCSVDir)
 
 	return os.WriteFile(reportFile, []byte(report), 0644)
 }
@@ -529,12 +529,12 @@ func main() {
 			log.Fatal("Usage: mdb-processor analyze <mdb_file> [tenant_code]")
 		}
 		mdbFile := os.Args[2]
-		tenantCode := "default"
+		tenantSlug := "default"
 		if len(os.Args) > 3 {
-			tenantCode = os.Args[3]
+			tenantSlug = os.Args[3]
 		}
 		
-		processor := NewMDBProcessor(mdbFile, tenantCode, "")
+		processor := NewMDBProcessor(mdbFile, tenantSlug, "")
 		if err := processor.AnalyzeMDB(); err != nil {
 			log.Fatal(err)
 		}

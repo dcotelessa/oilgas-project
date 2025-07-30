@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"oilgas-backend/internal/models"
 	"oilgas-backend/internal/repository"
 )
 
@@ -17,18 +18,18 @@ func NewCustomerService(repo repository.CustomerRepository) *CustomerService {
 	return &CustomerService{repo: repo}
 }
 
-func (s *CustomerService) GetAllCustomers(ctx context.Context) ([]repository.Customer, error) {
+func (s *CustomerService) GetAllCustomers(ctx context.Context) ([]models.Customer, error) {
 	return s.repo.GetAll(ctx)
 }
 
-func (s *CustomerService) GetCustomerByID(ctx context.Context, id int) (*repository.Customer, error) {
+func (s *CustomerService) GetCustomerByID(ctx context.Context, id int) (*models.Customer, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("invalid customer ID: %d", id)
 	}
 	return s.repo.GetByID(ctx, id)
 }
 
-func (s *CustomerService) SearchCustomers(ctx context.Context, query string) ([]repository.Customer, error) {
+func (s *CustomerService) SearchCustomers(ctx context.Context, query string) ([]models.Customer, error) {
 	query = strings.TrimSpace(query)
 	if len(query) < 2 {
 		return nil, fmt.Errorf("search query must be at least 2 characters")
@@ -36,14 +37,14 @@ func (s *CustomerService) SearchCustomers(ctx context.Context, query string) ([]
 	return s.repo.Search(ctx, query)
 }
 
-func (s *CustomerService) CreateCustomer(ctx context.Context, customer *repository.Customer) error {
+func (s *CustomerService) CreateCustomer(ctx context.Context, customer *models.Customer) error {
 	if err := s.validateCustomer(customer); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
 	}
 	return s.repo.Create(ctx, customer)
 }
 
-func (s *CustomerService) UpdateCustomer(ctx context.Context, customer *repository.Customer) error {
+func (s *CustomerService) UpdateCustomer(ctx context.Context, customer *models.Customer) error {
 	if customer.CustomerID <= 0 {
 		return fmt.Errorf("invalid customer ID: %d", customer.CustomerID)
 	}
@@ -60,7 +61,7 @@ func (s *CustomerService) DeleteCustomer(ctx context.Context, id int) error {
 	return s.repo.Delete(ctx, id)
 }
 
-func (s *CustomerService) validateCustomer(customer *repository.Customer) error {
+func (s *CustomerService) validateCustomer(customer *models.Customer) error {
 	if strings.TrimSpace(customer.Customer) == "" {
 		return fmt.Errorf("customer name is required")
 	}

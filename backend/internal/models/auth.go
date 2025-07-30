@@ -32,7 +32,7 @@ type User struct {
 type Tenant struct {
 	ID           uuid.UUID              `json:"id" db:"id"`
 	Name         string                 `json:"name" db:"name"`
-	Slug         string                 `json:"slug" db:"slug"`                    // URL-friendly unique identifier
+	Slug         string                 `json:"slug" db:"slug"`                    // Single source of truth for tenant identifier
 	DatabaseType string                 `json:"database_type" db:"database_type"` // tenant, main, test
 	DatabaseName *string                `json:"database_name" db:"database_name"` // Physical database name
 	Active       bool                   `json:"active" db:"active"`
@@ -87,6 +87,14 @@ type CreateUserRequest struct {
 	TenantID  string `json:"tenant_id" binding:"required"`
 	FirstName string `json:"first_name,omitempty"`
 	LastName  string `json:"last_name,omitempty"`
+}
+
+type CreateTenantRequest struct {
+	Name         string                 `json:"name" binding:"required"`
+	Slug         string                 `json:"slug" binding:"required"`           // Single identifier field
+	DatabaseType string                 `json:"database_type,omitempty"`           // defaults to "tenant"
+	DatabaseName *string                `json:"database_name,omitempty"`           // optional custom database name
+	Settings     map[string]interface{} `json:"settings,omitempty"`
 }
 
 // UserWithTenant represents a user with their tenant information (for joins)

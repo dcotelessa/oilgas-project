@@ -4,6 +4,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"github.com/google/uuid"
 	"oilgas-backend/internal/models"
 )
 
@@ -34,9 +35,10 @@ func (r *AuthRepository) GetUserByEmail(email string) (*models.User, error) {
 	return user, err
 }
 
-func (r *AuthRepository) GetUserTenants(userID int) ([]models.Tenant, error) {
+// Updated to accept UUID instead of int
+func (r *AuthRepository) GetUserTenants(userID uuid.UUID) ([]models.Tenant, error) {
 	query := `
-		SELECT t.id, t.code, t.name, t.database_name, t.active, t.created_at
+		SELECT t.id, t.name, t.slug, t.database_name, t.active, t.created_at
 		FROM tenants t
 		JOIN user_tenants ut ON t.id = ut.tenant_id
 		WHERE ut.user_id = $1 AND ut.active = true AND t.active = true
@@ -51,7 +53,7 @@ func (r *AuthRepository) GetUserTenants(userID int) ([]models.Tenant, error) {
 	var tenants []models.Tenant
 	for rows.Next() {
 		var tenant models.Tenant
-		err := rows.Scan(&tenant.ID, &tenant.Code, &tenant.Name, 
+		err := rows.Scan(&tenant.ID, &tenant.Name, &tenant.Slug, 
 			&tenant.DatabaseName, &tenant.Active, &tenant.CreatedAt)
 		if err != nil {
 			return nil, err
@@ -62,13 +64,13 @@ func (r *AuthRepository) GetUserTenants(userID int) ([]models.Tenant, error) {
 	return tenants, nil
 }
 
-func (r *AuthRepository) GetTenantByCode(code string) (*models.Tenant, error) {
-	query := `SELECT id, code, name, database_name, active, created_at 
-			  FROM tenants WHERE code = $1 AND active = true`
+func (r *AuthRepository) GetTenantBySlug(slug string) (*models.Tenant, error) {
+	query := `SELECT id, name, slug, database_name, active, created_at 
+			  FROM tenants WHERE slug = $1 AND active = true`
 	
 	tenant := &models.Tenant{}
-	err := r.authDB.QueryRow(query, code).Scan(
-		&tenant.ID, &tenant.Code, &tenant.Name, 
+	err := r.authDB.QueryRow(query, slug).Scan(
+		&tenant.ID, &tenant.Name, &tenant.Slug, 
 		&tenant.DatabaseName, &tenant.Active, &tenant.CreatedAt,
 	)
 	
@@ -77,4 +79,32 @@ func (r *AuthRepository) GetTenantByCode(code string) (*models.Tenant, error) {
 	}
 	
 	return tenant, err
+}
+
+func (r *AuthRepository) ListTenants() ([]models.Tenant, error) {
+	query := `
+		SELECT id, name, slug, database_type, database_name, active, created_at, updated_at
+		FROM tenants 
+		WHERE active = true
+		ORDER BY name`
+	
+	rows, err := r.authDB.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	
+	var tenants []models.Tenant
+	for rows.Next() {
+		var tenant models.Tenant
+		err := rows.Scan(&tenant.ID, &tenant.Name, &tenant.Slug,
+			&tenant.DatabaseType, &tenant.DatabaseName, &tenant.Active,
+			&tenant.CreatedAt, &tenant.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		tenants = append(tenants, tenant)
+	}
+	
+	return tenants, nil
 }

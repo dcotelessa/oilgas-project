@@ -2,60 +2,69 @@
 package auth
 
 import (
-	"context"
-	"fmt"
+	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"oilgas-backend/pkg/cache"
+	"github.com/google/uuid"
 	"oilgas-backend/internal/models"
 )
 
-type TenantSessionManager struct {
-	pool  *pgxpool.Pool
-	cache *cache.MemoryCache
+type SessionManager struct {
+	sessions map[string]*models.Session
+	mutex    sync.RWMutex
 }
 
-func NewTenantSessionManager(pool *pgxpool.Pool, cache *cache.MemoryCache) *TenantSessionManager {
-	return &TenantSessionManager{
-		pool:  pool,
-		cache: cache,
+func NewSessionManager() *SessionManager {
+	return &SessionManager{
+		sessions: make(map[string]*models.Session),
 	}
 }
 
-func (sm *TenantSessionManager) CreateSession(ctx context.Context, userID string, tenantID string) (*models.Session, error) {
+func (sm *SessionManager) CreateSession(userID uuid.UUID, tenantID string) string {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+	
+	sessionID := uuid.New().String()
 	session := &models.Session{
-		ID:           generateSessionID(),
-		UserID:       uuid.MustParse(userID), // Convert string to UUID
+		ID:           sessionID,
+		UserID:       userID,
 		TenantID:     tenantID,
 		ExpiresAt:    time.Now().Add(24 * time.Hour),
 		CreatedAt:    time.Now(),
 		LastActivity: time.Now(),
 	}
 	
-	// Store in cache for fast access
-	sm.cache.Set(session.ID, session, 24*time.Hour)
-	
-	return session, nil
+	sm.sessions[sessionID] = session
+	return sessionID
 }
 
-func (sm *TenantSessionManager) ValidateSession(ctx context.Context, sessionID string) (*models.Session, error) {
-	// Try cache first
-	if cached := sm.cache.Get(sessionID); cached != nil {
-		if session, ok := cached.(*models.Session); ok {
-			if time.Now().Before(session.ExpiresAt) {
-				// Update last activity
-				session.LastActivity = time.Now()
-				sm.cache.Set(sessionID, session, time.Until(session.ExpiresAt))
-				return session, nil
-			}
-		}
+func (sm *SessionManager) GetSession(sessionID string) (*models.Session, bool) {
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
+	
+	session, exists := sm.sessions[sessionID]
+	if !exists || time.Now().After(session.ExpiresAt) {
+		return nil, false
 	}
 	
-	return nil, ErrSessionExpired
+	return session, true
 }
 
-func (sm *TenantSessionManager) DeleteSession(ctx context.Context, sessionID string) error {
-	sm.cache.Delete(sessionID)
-	return nil
+func (sm *SessionManager) DeleteSession(sessionID string) {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+	
+	delete(sm.sessions, sessionID)
+}
+
+func (sm *SessionManager) CleanupExpired() {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+	
+	now := time.Now()
+	for sessionID, session := range sm.sessions {
+		if now.After(session.ExpiresAt) {
+			delete(sm.sessions, sessionID)
+		}
+	}
 }

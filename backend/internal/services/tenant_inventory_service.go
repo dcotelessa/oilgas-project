@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"oilgas-backend/internal/repository"
+	"oilgas-backend/internal/models"
 )
 
 // TenantInventoryService extends InventoryService with tenant capabilities
@@ -24,7 +25,7 @@ func NewTenantInventoryService(repo repository.InventoryRepository, tenantRepo r
 }
 
 // Tenant-aware methods
-func (s *TenantInventoryService) GetInventoryForTenant(ctx context.Context, tenantID string, filters repository.InventoryFilters) ([]repository.InventoryItem, int, error) {
+func (s *TenantInventoryService) GetInventoryForTenant(ctx context.Context, tenantID string, filters models.InventoryFilters) ([]models.InventoryItem, int, error) {
 	if err := s.validateTenantID(tenantID); err != nil {
 		return nil, 0, err
 	}
@@ -49,7 +50,7 @@ func (s *TenantInventoryService) GetInventoryForTenant(ctx context.Context, tena
 	return items, total, nil
 }
 
-func (s *TenantInventoryService) GetInventoryByIDForTenant(ctx context.Context, tenantID string, id int) (*repository.InventoryItem, error) {
+func (s *TenantInventoryService) GetInventoryByIDForTenant(ctx context.Context, tenantID string, id int) (*models.InventoryItem, error) {
 	if err := s.validateTenantID(tenantID); err != nil {
 		return nil, err
 	}
@@ -59,7 +60,7 @@ func (s *TenantInventoryService) GetInventoryByIDForTenant(ctx context.Context, 
 	return s.tenantRepo.GetByIDForTenant(ctx, tenantID, id)
 }
 
-func (s *TenantInventoryService) GetInventoryByWorkOrderForTenant(ctx context.Context, tenantID, workOrder string) ([]repository.InventoryItem, error) {
+func (s *TenantInventoryService) GetInventoryByWorkOrderForTenant(ctx context.Context, tenantID, workOrder string) ([]models.InventoryItem, error) {
 	if err := s.validateTenantID(tenantID); err != nil {
 		return nil, err
 	}
@@ -70,7 +71,7 @@ func (s *TenantInventoryService) GetInventoryByWorkOrderForTenant(ctx context.Co
 	return s.tenantRepo.GetByWorkOrderForTenant(ctx, tenantID, workOrder)
 }
 
-func (s *TenantInventoryService) SearchInventoryForTenant(ctx context.Context, tenantID, query string) ([]repository.InventoryItem, error) {
+func (s *TenantInventoryService) SearchInventoryForTenant(ctx context.Context, tenantID, query string) ([]models.InventoryItem, error) {
 	if err := s.validateTenantID(tenantID); err != nil {
 		return nil, err
 	}
@@ -81,14 +82,14 @@ func (s *TenantInventoryService) SearchInventoryForTenant(ctx context.Context, t
 	return s.tenantRepo.SearchForTenant(ctx, tenantID, query)
 }
 
-func (s *TenantInventoryService) GetAvailableInventoryForTenant(ctx context.Context, tenantID string) ([]repository.InventoryItem, error) {
+func (s *TenantInventoryService) GetAvailableInventoryForTenant(ctx context.Context, tenantID string) ([]models.InventoryItem, error) {
 	if err := s.validateTenantID(tenantID); err != nil {
 		return nil, err
 	}
 	return s.tenantRepo.GetAvailableForTenant(ctx, tenantID)
 }
 
-func (s *TenantInventoryService) GetInventorySummaryForTenant(ctx context.Context, tenantID string, filters repository.InventoryFilters) (*repository.InventorySummary, error) {
+func (s *TenantInventoryService) GetInventorySummaryForTenant(ctx context.Context, tenantID string, filters models.InventoryFilters) (*models.InventorySummary, error) {
 	if err := s.validateTenantID(tenantID); err != nil {
 		return nil, err
 	}
@@ -96,7 +97,7 @@ func (s *TenantInventoryService) GetInventorySummaryForTenant(ctx context.Contex
 }
 
 // Work Order methods
-func (s *TenantInventoryService) GetWorkOrdersForTenant(ctx context.Context, tenantID string, filters repository.WorkOrderFilters) ([]repository.WorkOrder, int, error) {
+func (s *TenantInventoryService) GetWorkOrdersForTenant(ctx context.Context, tenantID string, filters models.WorkOrderFilters) ([]models.WorkOrder, int, error) {
 	if err := s.validateTenantID(tenantID); err != nil {
 		return nil, 0, err
 	}
@@ -121,7 +122,7 @@ func (s *TenantInventoryService) GetWorkOrdersForTenant(ctx context.Context, ten
 	return workOrders, total, nil
 }
 
-func (s *TenantInventoryService) GetWorkOrderDetailsForTenant(ctx context.Context, tenantID, workOrderID string) (*repository.WorkOrderDetails, error) {
+func (s *TenantInventoryService) GetWorkOrderDetailsForTenant(ctx context.Context, tenantID, workOrderID string) (*models.WorkOrderDetails, error) {
 	if err := s.validateTenantID(tenantID); err != nil {
 		return nil, err
 	}
@@ -133,7 +134,7 @@ func (s *TenantInventoryService) GetWorkOrderDetailsForTenant(ctx context.Contex
 }
 
 // Tenant-aware CRUD operations
-func (s *TenantInventoryService) CreateInventoryItemForTenant(ctx context.Context, tenantID string, item *repository.InventoryItem) error {
+func (s *TenantInventoryService) CreateInventoryItemForTenant(ctx context.Context, tenantID string, item *models.InventoryItem) error {
 	if err := s.validateTenantID(tenantID); err != nil {
 		return err
 	}
@@ -147,7 +148,7 @@ func (s *TenantInventoryService) CreateInventoryItemForTenant(ctx context.Contex
 	return s.tenantRepo.CreateForTenant(ctx, tenantID, item)
 }
 
-func (s *TenantInventoryService) UpdateInventoryItemForTenant(ctx context.Context, tenantID string, item *repository.InventoryItem) error {
+func (s *TenantInventoryService) UpdateInventoryItemForTenant(ctx context.Context, tenantID string, item *models.InventoryItem) error {
 	if err := s.validateTenantID(tenantID); err != nil {
 		return err
 	}

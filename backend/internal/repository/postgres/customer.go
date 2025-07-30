@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"oilgas-backend/internal/repository"
+	"oilgas-backend/internal/models"
 )
 
 type CustomerRepo struct {
@@ -18,7 +19,7 @@ func NewCustomerRepository(db *sql.DB) repository.CustomerRepository {
 	return &CustomerRepo{db: db}
 }
 
-func (r *CustomerRepo) GetAll(ctx context.Context) ([]repository.Customer, error) {
+func (r *CustomerRepo) GetAll(ctx context.Context) ([]models.Customer, error) {
 	query := `
 		SELECT customer_id, customer, billing_address, billing_city, billing_state, 
 		       billing_zipcode, contact, phone, fax, email, deleted, created_at
@@ -32,9 +33,9 @@ func (r *CustomerRepo) GetAll(ctx context.Context) ([]repository.Customer, error
 	}
 	defer rows.Close()
 
-	var customers []repository.Customer
+	var customers []models.Customer
 	for rows.Next() {
-		var c repository.Customer
+		var c models.Customer
 		err := rows.Scan(&c.CustomerID, &c.Customer, &c.BillingAddress, &c.BillingCity,
 			&c.BillingState, &c.BillingZipcode, &c.Contact, &c.Phone, &c.Fax, 
 			&c.Email, &c.Deleted, &c.CreatedAt)
@@ -47,14 +48,14 @@ func (r *CustomerRepo) GetAll(ctx context.Context) ([]repository.Customer, error
 	return customers, rows.Err()
 }
 
-func (r *CustomerRepo) GetByID(ctx context.Context, id int) (*repository.Customer, error) {
+func (r *CustomerRepo) GetByID(ctx context.Context, id int) (*models.Customer, error) {
 	query := `
 		SELECT customer_id, customer, billing_address, billing_city, billing_state,
 		       billing_zipcode, contact, phone, fax, email, deleted, created_at
 		FROM store.customers 
 		WHERE customer_id = $1 AND deleted = false`
 	
-	var c repository.Customer
+	var c models.Customer
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&c.CustomerID, &c.Customer, &c.BillingAddress, &c.BillingCity,
 		&c.BillingState, &c.BillingZipcode, &c.Contact, &c.Phone, 
@@ -70,7 +71,7 @@ func (r *CustomerRepo) GetByID(ctx context.Context, id int) (*repository.Custome
 	return &c, nil
 }
 
-func (r *CustomerRepo) Search(ctx context.Context, query string) ([]repository.Customer, error) {
+func (r *CustomerRepo) Search(ctx context.Context, query string) ([]models.Customer, error) {
 	searchQuery := `
 		SELECT customer_id, customer, billing_address, billing_city, billing_state,
 		       billing_zipcode, contact, phone, fax, email, deleted, created_at
@@ -86,9 +87,9 @@ func (r *CustomerRepo) Search(ctx context.Context, query string) ([]repository.C
 	}
 	defer rows.Close()
 
-	var customers []repository.Customer
+	var customers []models.Customer
 	for rows.Next() {
-		var c repository.Customer
+		var c models.Customer
 		err := rows.Scan(&c.CustomerID, &c.Customer, &c.BillingAddress, &c.BillingCity,
 			&c.BillingState, &c.BillingZipcode, &c.Contact, &c.Phone, &c.Fax,
 			&c.Email, &c.Deleted, &c.CreatedAt)
@@ -101,7 +102,7 @@ func (r *CustomerRepo) Search(ctx context.Context, query string) ([]repository.C
 	return customers, rows.Err()
 }
 
-func (r *CustomerRepo) Create(ctx context.Context, customer *repository.Customer) error {
+func (r *CustomerRepo) Create(ctx context.Context, customer *models.Customer) error {
 	query := `
 		INSERT INTO store.customers (customer, billing_address, billing_city, billing_state,
 			billing_zipcode, contact, phone, fax, email)
@@ -120,7 +121,7 @@ func (r *CustomerRepo) Create(ctx context.Context, customer *repository.Customer
 	return nil
 }
 
-func (r *CustomerRepo) Update(ctx context.Context, customer *repository.Customer) error {
+func (r *CustomerRepo) Update(ctx context.Context, customer *models.Customer) error {
 	query := `
 		UPDATE store.customers 
 		SET customer = $2, billing_address = $3, billing_city = $4, billing_state = $5,

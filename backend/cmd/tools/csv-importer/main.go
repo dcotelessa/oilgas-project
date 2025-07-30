@@ -22,7 +22,7 @@ func main() {
     fmt.Printf("📥 Importing CSV data for tenant: %s\n", tenant)
     
     // Connect to tenant database
-    dbName := fmt.Sprintf("oilgas_%s", tenant)
+    // dbName := fmt.Sprintf("oilgas_%s", tenant)
     // TODO: Use your existing database connection logic here
     
     // Import CSV files from tools/ output

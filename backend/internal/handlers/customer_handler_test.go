@@ -1,3 +1,4 @@
+// backend/internal/handlers/customer_handler_test.go
 package handlers_test
 
 import (

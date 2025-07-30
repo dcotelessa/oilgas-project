@@ -1,129 +1,137 @@
-// internal/repository/interfaces.go
+// backend/internal/repository/interfaces.go
 package repository
 
 import (
 	"context"
+	"database/sql"
 	"time"
+
+	"oilgas-backend/internal/models"
 )
 
-// Customer domain
-type Customer struct {
-	CustomerID      int       `json:"customer_id" db:"customer_id"`
-	Customer        string    `json:"customer" db:"customer"`
-	BillingAddress  *string   `json:"billing_address" db:"billing_address"`
-	BillingCity     *string   `json:"billing_city" db:"billing_city"`
-	BillingState    *string   `json:"billing_state" db:"billing_state"`
-	BillingZipcode  *string   `json:"billing_zipcode" db:"billing_zipcode"`
-	Contact         *string   `json:"contact" db:"contact"`
-	Phone           *string   `json:"phone" db:"phone"`
-	Fax             *string   `json:"fax" db:"fax"`
-	Email           *string   `json:"email" db:"email"`
-	Deleted         bool      `json:"deleted" db:"deleted"`
-	CreatedAt       time.Time `json:"created_at" db:"created_at"`
-}
-
+// Repository interfaces - Legacy (non-tenant-aware)
 type CustomerRepository interface {
-	GetAll(ctx context.Context) ([]Customer, error)
-	GetByID(ctx context.Context, id int) (*Customer, error)
-	Search(ctx context.Context, query string) ([]Customer, error)
-	Create(ctx context.Context, customer *Customer) error
-	Update(ctx context.Context, customer *Customer) error
+	GetAll(ctx context.Context) ([]models.Customer, error)
+	GetByID(ctx context.Context, id int) (*models.Customer, error)
+	Search(ctx context.Context, query string) ([]models.Customer, error)
+	Create(ctx context.Context, customer *models.Customer) error
+	Update(ctx context.Context, customer *models.Customer) error
 	Delete(ctx context.Context, id int) error
-}
-
-// Inventory domain
-type InventoryItem struct {
-	ID           int       `json:"id" db:"id"`
-	WorkOrder    *string   `json:"work_order" db:"work_order"`
-	CustomerID   *int      `json:"customer_id" db:"customer_id"`
-	Customer     *string   `json:"customer" db:"customer"`
-	Joints       *int      `json:"joints" db:"joints"`
-	Size         *string   `json:"size" db:"size"`
-	Weight       *float64  `json:"weight" db:"weight"`
-	Grade        *string   `json:"grade" db:"grade"`
-	Connection   *string   `json:"connection" db:"connection"`
-	DateIn       *time.Time `json:"date_in" db:"date_in"`
-	DateOut      *time.Time `json:"date_out" db:"date_out"`
-	WellIn       *string   `json:"well_in" db:"well_in"`
-	LeaseIn      *string   `json:"lease_in" db:"lease_in"`
-	WellOut      *string   `json:"well_out" db:"well_out"`
-	LeaseOut     *string   `json:"lease_out" db:"lease_out"`
-	Location     *string   `json:"location" db:"location"`
-	Notes        *string   `json:"notes" db:"notes"`
-	Deleted      bool      `json:"deleted" db:"deleted"`
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 }
 
 type InventoryRepository interface {
-	GetAll(ctx context.Context, filters InventoryFilters) ([]InventoryItem, error)
-	GetByID(ctx context.Context, id int) (*InventoryItem, error)
-	GetByWorkOrder(ctx context.Context, workOrder string) ([]InventoryItem, error)
-	GetAvailable(ctx context.Context) ([]InventoryItem, error)
-	Search(ctx context.Context, query string) ([]InventoryItem, error)
-	Create(ctx context.Context, item *InventoryItem) error
-	Update(ctx context.Context, item *InventoryItem) error
+	GetAll(ctx context.Context, filters models.InventoryFilters) ([]models.InventoryItem, error)
+	GetByID(ctx context.Context, id int) (*models.InventoryItem, error)
+	GetByWorkOrder(ctx context.Context, workOrder string) ([]models.InventoryItem, error)
+	GetAvailable(ctx context.Context) ([]models.InventoryItem, error)
+	Search(ctx context.Context, query string) ([]models.InventoryItem, error)
+	Create(ctx context.Context, item *models.InventoryItem) error
+	Update(ctx context.Context, item *models.InventoryItem) error
 	Delete(ctx context.Context, id int) error
 }
 
-type InventoryFilters struct {
-	CustomerID *int
-	Grade      *string
-	Size       *string
-	Location   *string
-	DateFrom   *time.Time
-	DateTo     *time.Time
-	Available  *bool
-	Limit      int
-	Offset     int
-}
-
-// Received items domain
-type ReceivedItem struct {
-	ID             int       `json:"id" db:"id"`
-	WorkOrder      *string   `json:"work_order" db:"work_order"`
-	CustomerID     *int      `json:"customer_id" db:"customer_id"`
-	Customer       *string   `json:"customer" db:"customer"`
-	Joints         *int      `json:"joints" db:"joints"`
-	Size           *string   `json:"size" db:"size"`
-	Weight         *float64  `json:"weight" db:"weight"`
-	Grade          *string   `json:"grade" db:"grade"`
-	Connection     *string   `json:"connection" db:"connection"`
-	Well           *string   `json:"well" db:"well"`
-	Lease          *string   `json:"lease" db:"lease"`
-	OrderedBy      *string   `json:"ordered_by" db:"ordered_by"`
-	Notes          *string   `json:"notes" db:"notes"`
-	DateReceived   *time.Time `json:"date_received" db:"date_received"`
-	InProduction   bool      `json:"in_production" db:"in_production"`
-	Complete       bool      `json:"complete" db:"complete"`
-	Deleted        bool      `json:"deleted" db:"deleted"`
-	CreatedAt      time.Time `json:"created_at" db:"created_at"`
-}
-
 type ReceivedRepository interface {
-	GetAll(ctx context.Context, filters ReceivedFilters) ([]ReceivedItem, error)
-	GetByID(ctx context.Context, id int) (*ReceivedItem, error)
-	GetByWorkOrder(ctx context.Context, workOrder string) ([]ReceivedItem, error)
-	GetInProduction(ctx context.Context) ([]ReceivedItem, error)
-	GetPending(ctx context.Context) ([]ReceivedItem, error)
-	Create(ctx context.Context, item *ReceivedItem) error
-	Update(ctx context.Context, item *ReceivedItem) error
+	GetAll(ctx context.Context, filters models.ReceivedFilters) ([]models.ReceivedItem, error)
+	GetByID(ctx context.Context, id int) (*models.ReceivedItem, error)
+	GetByWorkOrder(ctx context.Context, workOrder string) ([]models.ReceivedItem, error)
+	GetInProduction(ctx context.Context) ([]models.ReceivedItem, error)
+	GetPending(ctx context.Context) ([]models.ReceivedItem, error)
+	Create(ctx context.Context, item *models.ReceivedItem) error
+	Update(ctx context.Context, item *models.ReceivedItem) error
 	MarkComplete(ctx context.Context, id int) error
 	Delete(ctx context.Context, id int) error
 }
 
-type ReceivedFilters struct {
-	CustomerID   *int
-	InProduction *bool
-	Complete     *bool
-	DateFrom     *time.Time
-	DateTo       *time.Time
-	Limit        int
-	Offset       int
+// Tenant-aware repository interfaces (Fixed methods to match service usage)
+type TenantCustomerRepository interface {
+	// Updated signature to include filters parameter
+	GetAllForTenant(ctx context.Context, tenantID string, filters models.CustomerFilters) ([]models.Customer, error)
+	GetByIDForTenant(ctx context.Context, tenantID string, id int) (*models.Customer, error)
+	SearchForTenant(ctx context.Context, tenantID, query string) ([]models.Customer, error)
+	GetCountForTenant(ctx context.Context, tenantID string, filters models.CustomerFilters) (int, error)
+	GetRelatedDataForTenant(ctx context.Context, tenantID string, customerID int) (*models.CustomerRelatedData, error)
+	CreateForTenant(ctx context.Context, tenantID string, customer *models.Customer) error
+	UpdateForTenant(ctx context.Context, tenantID string, customer *models.Customer) error
+	DeleteForTenant(ctx context.Context, tenantID string, id int) error
 }
 
-// Repository collection
+type TenantInventoryRepository interface {
+	GetAllForTenant(ctx context.Context, tenantID string, filters models.InventoryFilters) ([]models.InventoryItem, error)
+	GetByIDForTenant(ctx context.Context, tenantID string, id int) (*models.InventoryItem, error)
+	GetByWorkOrderForTenant(ctx context.Context, tenantID, workOrder string) ([]models.InventoryItem, error)
+	GetAvailableForTenant(ctx context.Context, tenantID string) ([]models.InventoryItem, error)
+	SearchForTenant(ctx context.Context, tenantID, query string) ([]models.InventoryItem, error)
+	GetCountForTenant(ctx context.Context, tenantID string, filters models.InventoryFilters) (int, error)
+	GetSummaryForTenant(ctx context.Context, tenantID string, filters models.InventoryFilters) (*models.InventorySummary, error)
+	GetWorkOrdersForTenant(ctx context.Context, tenantID string, filters models.WorkOrderFilters) ([]models.WorkOrder, error)
+	GetWorkOrderCountForTenant(ctx context.Context, tenantID string, filters models.WorkOrderFilters) (int, error)
+	GetWorkOrderDetailsForTenant(ctx context.Context, tenantID, workOrderID string) (*models.WorkOrderDetails, error)
+	SearchWorkOrdersForTenant(ctx context.Context, tenantID, query string) ([]models.WorkOrder, error)
+	CreateForTenant(ctx context.Context, tenantID string, item *models.InventoryItem) error
+	UpdateForTenant(ctx context.Context, tenantID string, item *models.InventoryItem) error
+	DeleteForTenant(ctx context.Context, tenantID string, id int) error
+}
+
+type TenantReceivedRepository interface {
+	GetAllForTenant(ctx context.Context, tenantID string, filters models.ReceivedFilters) ([]models.ReceivedItem, error)
+	GetByIDForTenant(ctx context.Context, tenantID string, id int) (*models.ReceivedItem, error)
+	GetByWorkOrderForTenant(ctx context.Context, tenantID, workOrder string) ([]models.ReceivedItem, error)
+	GetInProductionForTenant(ctx context.Context, tenantID string) ([]models.ReceivedItem, error)
+	GetPendingForTenant(ctx context.Context, tenantID string) ([]models.ReceivedItem, error)
+	CreateForTenant(ctx context.Context, tenantID string, item *models.ReceivedItem) error
+	UpdateForTenant(ctx context.Context, tenantID string, item *models.ReceivedItem) error
+	MarkCompleteForTenant(ctx context.Context, tenantID string, id int) error
+	DeleteForTenant(ctx context.Context, tenantID string, id int) error
+}
+
+// Search repository interface
+type SearchRepository interface {
+	SearchAll(ctx context.Context, query string) (*models.SearchResults, error)
+	SearchAllForTenant(ctx context.Context, tenantID, query string) (*models.SearchResults, error)
+}
+
+// Reference data repository interfaces
+type ReferenceRepository interface {
+	GetGrades(ctx context.Context) ([]models.Grade, error)
+	GetSizes(ctx context.Context) ([]models.Size, error)
+	GetConnections(ctx context.Context) ([]models.Connection, error)
+	GetLocationsForTenant(ctx context.Context, tenantID string) ([]models.Location, error)
+}
+
+// Tenant database management
+type TenantDatabaseManager interface {
+	GetTenantDB(tenantID string) (*sql.DB, error)
+	ValidateTenantExists(tenantID string) bool
+	GetAllTenantIDs() ([]string, error)
+	GetConnectionStats(tenantID string) (*TenantConnectionStats, error)
+	CloseAllConnections()
+}
+
+type TenantConnectionStats struct {
+	TenantID        string        `json:"tenant_id"`
+	MaxOpenConns    int           `json:"max_open_conns"`
+	MaxIdleConns    int           `json:"max_idle_conns"`
+	OpenConnections int           `json:"open_connections"`
+	IdleConnections int           `json:"idle_connections"`
+	InUseConns      int           `json:"in_use_connections"`
+	ConnMaxLifetime time.Duration `json:"conn_max_lifetime"`
+	LastActivity    time.Time     `json:"last_activity"`
+}
+
+// Repository collections for dependency injection
 type Repositories struct {
 	Customer  CustomerRepository
 	Inventory InventoryRepository
 	Received  ReceivedRepository
+	Reference ReferenceRepository
+	Search    SearchRepository
+}
+
+type TenantRepositories struct {
+	Customer  TenantCustomerRepository
+	Inventory TenantInventoryRepository
+	Received  TenantReceivedRepository
+	Search    SearchRepository
+	Reference ReferenceRepository
+	DBManager TenantDatabaseManager
 }

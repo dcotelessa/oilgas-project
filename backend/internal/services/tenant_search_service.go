@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"oilgas-backend/internal/repository"
+	"oilgas-backend/internal/models"
 )
 
 type TenantSearchService struct {
@@ -22,7 +23,7 @@ func NewTenantSearchService(customerRepo repository.TenantCustomerRepository, in
 	}
 }
 
-func (s *TenantSearchService) GlobalSearchForTenant(ctx context.Context, tenantID, query string, limit int) (*repository.SearchResults, error) {
+func (s *TenantSearchService) GlobalSearchForTenant(ctx context.Context, tenantID, query string, limit int) (*models.SearchResults, error) {
 	if err := s.validateTenantID(tenantID); err != nil {
 		return nil, err
 	}
@@ -42,24 +43,24 @@ func (s *TenantSearchService) GlobalSearchForTenant(ctx context.Context, tenantI
 	// Search across different entity types
 	customerResults, err := s.customerRepo.SearchForTenant(ctx, tenantID, query)
 	if err != nil {
-		customerResults = []repository.Customer{} // Continue with empty results
+		customerResults = []models.Customer{} // Continue with empty results
 	}
 	
 	inventoryResults, err := s.inventoryRepo.SearchForTenant(ctx, tenantID, query)
 	if err != nil {
-		inventoryResults = []repository.InventoryItem{} // Continue with empty results
+		inventoryResults = []models.InventoryItem{} // Continue with empty results
 	}
 	
 	workOrderResults, err := s.inventoryRepo.SearchWorkOrdersForTenant(ctx, tenantID, query)
 	if err != nil {
-		workOrderResults = []repository.WorkOrder{} // Continue with empty results
+		workOrderResults = []models.WorkOrder{} // Continue with empty results
 	}
 	
 	// Convert to unified search results
-	results := &repository.SearchResults{
+	results := &models.SearchResults{
 		TenantID: tenantID,
 		Query:    query,
-		Summary: repository.SearchSummary{
+		Summary: models.SearchSummary{
 			Customers:  len(customerResults),
 			Inventory:  len(inventoryResults),
 			WorkOrders: len(workOrderResults),
@@ -71,7 +72,7 @@ func (s *TenantSearchService) GlobalSearchForTenant(ctx context.Context, tenantI
 		if len(results.Results) >= limit {
 			break
 		}
-		results.Results = append(results.Results, repository.SearchResult{
+		results.Results = append(results.Results, models.SearchResult{
 			Type:   "customer",
 			ID:     customer.CustomerID,
 			Title:  customer.Customer,
@@ -85,7 +86,7 @@ func (s *TenantSearchService) GlobalSearchForTenant(ctx context.Context, tenantI
 		if len(results.Results) >= limit {
 			break
 		}
-		results.Results = append(results.Results, repository.SearchResult{
+		results.Results = append(results.Results, models.SearchResult{
 			Type:   "inventory",
 			ID:     item.ID,
 			Title:  s.buildInventoryTitle(item),
@@ -99,7 +100,7 @@ func (s *TenantSearchService) GlobalSearchForTenant(ctx context.Context, tenantI
 		if len(results.Results) >= limit {
 			break
 		}
-		results.Results = append(results.Results, repository.SearchResult{
+		results.Results = append(results.Results, models.SearchResult{
 			Type:   "work_order",
 			ID:     *workOrder.WorkOrder,
 			Title:  fmt.Sprintf("WO: %s", *workOrder.WorkOrder),
@@ -113,7 +114,7 @@ func (s *TenantSearchService) GlobalSearchForTenant(ctx context.Context, tenantI
 	return results, nil
 }
 
-func (s *TenantSearchService) buildCustomerDetail(customer repository.Customer) string {
+func (s *TenantSearchService) buildCustomerDetail(customer models.Customer) string {
 	var details []string
 	
 	if customer.Contact != nil && *customer.Contact != "" {
@@ -137,14 +138,14 @@ func (s *TenantSearchService) buildCustomerDetail(customer repository.Customer) 
 	return strings.Join(details, " • ")
 }
 
-func (s *TenantSearchService) buildInventoryTitle(item repository.InventoryItem) string {
+func (s *TenantSearchService) buildInventoryTitle(item models.InventoryItem) string {
 	if item.WorkOrder != nil && *item.WorkOrder != "" {
 		return fmt.Sprintf("WO: %s", *item.WorkOrder)
 	}
 	return fmt.Sprintf("Inventory #%d", item.ID)
 }
 
-func (s *TenantSearchService) buildInventoryDetail(item repository.InventoryItem) string {
+func (s *TenantSearchService) buildInventoryDetail(item models.InventoryItem) string {
 	var details []string
 	
 	if item.Customer != nil {
@@ -166,7 +167,7 @@ func (s *TenantSearchService) buildInventoryDetail(item repository.InventoryItem
 	return strings.Join(details, " • ")
 }
 
-func (s *TenantSearchService) buildWorkOrderDetail(workOrder repository.WorkOrder) string {
+func (s *TenantSearchService) buildWorkOrderDetail(workOrder models.WorkOrder) string {
 	var details []string
 	
 	if workOrder.Customer != nil {

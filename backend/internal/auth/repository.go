@@ -1,5 +1,4 @@
-
-// internal/auth/repository.go
+// backend/internal/auth/repository.go
 package auth
 
 import (
@@ -17,13 +16,13 @@ func NewAuthRepository(authDB *sql.DB) *AuthRepository {
 	return &AuthRepository{authDB: authDB}
 }
 
-func (r *AuthRepository) GetUserByEmail(email string) (*User, error) {
+func (r *AuthRepository) GetUserByEmail(email string) (*models.User, error) {
 	query := `
 		SELECT id, email, username, first_name, last_name, active, created_at 
 		FROM users 
 		WHERE email = $1 AND active = true`
 	
-	user := &User{}
+	user := &models.User{}
 	err := r.authDB.QueryRow(query, email).Scan(
 		&user.ID, &user.Email, &user.Username, 
 		&user.FirstName, &user.LastName, &user.Active, &user.CreatedAt,
@@ -36,7 +35,7 @@ func (r *AuthRepository) GetUserByEmail(email string) (*User, error) {
 	return user, err
 }
 
-func (r *AuthRepository) GetUserTenants(userID int) ([]Tenant, error) {
+func (r *AuthRepository) GetUserTenants(userID int) ([]models.Tenant, error) {
 	query := `
 		SELECT t.id, t.code, t.name, t.database_name, t.active
 		FROM tenants t
@@ -50,10 +49,10 @@ func (r *AuthRepository) GetUserTenants(userID int) ([]Tenant, error) {
 	}
 	defer rows.Close()
 	
-	var tenants []Tenant
+	var tenants []models.Tenant
 	for rows.Next() {
-		var tenant Tenant
-		err := rows.Scan(&tenant.ID, &tenant.Code, &tenant.Name, &tenant.DatabaseName, &tenant.Active)
+		var tenant models.Tenant
+		err := rows.Scan(&tenant.ID, &tenant.Slug, &tenant.Name, &tenant.DatabaseName, &tenant.Active)
 		if err != nil {
 			return nil, err
 		}
@@ -61,19 +60,4 @@ func (r *AuthRepository) GetUserTenants(userID int) ([]Tenant, error) {
 	}
 	
 	return tenants, nil
-}
-
-func (r *AuthRepository) GetTenantByCode(code string) (*Tenant, error) {
-	query := `SELECT id, code, name, database_name, active FROM tenants WHERE code = $1 AND active = true`
-	
-	tenant := &Tenant{}
-	err := r.authDB.QueryRow(query, code).Scan(
-		&tenant.ID, &tenant.Code, &tenant.Name, &tenant.DatabaseName, &tenant.Active,
-	)
-	
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("tenant not found")
-	}
-	
-	return tenant, err
 }
