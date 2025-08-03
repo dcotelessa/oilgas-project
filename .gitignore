@@ -1,173 +1,48 @@
-# Oil & Gas Inventory System - .gitignore
-# Protects sensitive data and development artifacts
-
-# ===== SENSITIVE DATA - NEVER COMMIT =====
-# Environment files with real credentials
-.env
-.env.production
-.env.prod
-.env.staging
-.env.dev
-.env.local
-
-# Real database files
+# Database files
 *.mdb
 *.accdb
 *.db
-*.sqlite
-*.sqlite3
 
-# Database backups and dumps
-backup_*.sql
-dump_*.sql
-*_backup.sql
-*_production.sql
-real_data/
-production_data/
-backup/
-backups/
+# Environment files  
+.env
+.env.dev
+.env.test
+.env.prod
+.env.production
+.env.staging
 
-# Real customer data exports
-customer_export_*.csv
-real_customers.csv
-production_*.csv
-sensitive_*.csv
-
-# Configuration files with real endpoints/keys
-config.production.json
-config.prod.json
-secrets.json
-credentials.json
-
-# SSL certificates and keys
-*.pem
-*.key
-*.crt
-*.p12
-*.pfx
-ssl/
-certs/
-certificates/
-
-# ===== DEVELOPMENT ARTIFACTS =====
-# Go build artifacts
+# Build artifacts
 *.exe
-*.exe~
-*.dll
-*.so
-*.dylib
 vendor/
-go.sum
-*.test
-*.out
-coverage.out
-coverage.html
-
-# Backend build artifacts
-backend/server
-backend/migrator
-backend/*.exe
-main
-server
-migrator
-
-# Node.js / Frontend
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
 dist/
-build/
-.vite/
-.cache/
-frontend/dist/
-frontend/build/
 
-# ===== IDE AND EDITOR FILES =====
-# VSCode
+# Generated data
+customers.csv
+customers_cleaned.csv
+database/data/exported/*
+database/data/clean/*
+database/logs/*
+
+# Prep
+database/analysis/*
+database/schema/*
+database/migrations/*
+database/seeds/*
+database/test-seeds/*
+db_prep/*
+
+# Tools
+customer-cleaner
+customer-analyzer
+standardized-importer
+
+# IDE
 .vscode/
-*.code-workspace
-
-# IntelliJ IDEA
 .idea/
-*.iml
-*.ipr
-*.iws
-
-# Vim
 *.swp
-*.swo
-*~
-
-# macOS
 .DS_Store
-.AppleDouble
-.LSOverride
 
-# Windows
-Thumbs.db
-*.stackdump
-[Dd]esktop.ini
-
-# ===== DOCKER AND DEPLOYMENT =====
-# Docker volumes and data
+# Docker
 postgres_data/
 pgadmin_data/
-
-# Docker override files (may contain sensitive info)
-docker-compose.override.yml
-docker-compose.production.yml
-
-# ===== LOGS AND TEMPORARY FILES =====
-# Application logs
-logs/
-*.log
-npm-debug.log*
-build-errors.log
-
-# Temporary directories
-tmp/
-temp/
-.tmp/
-
-# ===== TESTING AND ANALYSIS =====
-# Test results
-coverage/
-.nyc_output/
-test-results/
-
-# Migration analysis (may contain sensitive schema info)
-db_prep/*
-database/*
-tools/input/**
-
-# ===== BACKUP AND ARCHIVE FILES =====
-*.bak
-*.backup
-*.old
-*.orig
-*.tar
-*.tar.gz
-*.zip
-
-# ===== PROJECT SPECIFIC =====
-# Real ColdFusion source (if sensitive)
-coldfusion_files/
-
-# ===== SAFE FILES TO COMMIT =====
-# These files are explicitly safe (override any global ignores)
-!.env.example
-!seeds/local_seeds.sql
-!README.md
-!docs/**
-!frontend/src/**
-!backend/cmd/**
-!backend/internal/**
-!backend/pkg/**
-
-# Tools build artifacts
-tools/bin/
-tools/output/
-tools/coverage/
-tools/*.tmp

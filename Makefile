@@ -1,434 +1,436 @@
-# Makefile - Enhanced with MDB to PostgreSQL migration support
-.PHONY: help setup clean dev test migrate seed
+# Optimized Makefile for Customer Migration with petros-lb.mdb
+.PHONY: help setup clean dev test
 
 # Colors for output
 GREEN := \033[32m
 YELLOW := \033[33m
 RED := \033[31m
+BLUE := \033[34m
 NC := \033[0m
 
-# Environment configuration (eventually in .env.local or..)
-DEV_DATABASE_URL ?= postgresql://oilgas_user:oilgas_pass@localhost:5432/oilgas_dev
-TEST_DATABASE_URL ?= postgresql://oilgas_test_user:oilgas_test_pass@localhost:5433/oilgas_test
-MDB_FILE ?= db_prep/petros.mdb
-DATA_PATH ?= database/data/clean
-TENANT_ID ?= local-dev
+# Configuration
+MDB_FILE := db_prep/petros-lb.mdb
+TENANT_ID := local-dev
+DEV_DATABASE_URL := postgresql://oilgas_user:oilgas_pass@localhost:5432/oilgas_dev
+TEST_DATABASE_URL := postgresql://oilgas_test_user:oilgas_test_pass@localhost:5433/oilgas_test
 
-help: ## Show this help message
-	@echo "Oil & Gas Inventory System - Migration Commands"
-	@echo "=============================================="
+help: ## Show available commands
+	@echo "$(BLUE)🛢️  Oil & Gas Customer Migration Commands$(NC)"
+	@echo "============================================="
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(YELLOW)📋 Quick Start:$(NC)"
+	@echo "  1. make check-mdb        # Verify your MDB file"
+	@echo "  2. make setup-customers  # Complete customer setup"
+	@echo "  3. make verify-customers # Verify everything works"
 
 # =============================================================================
-# Setup and Infrastructure
+# PRE-FLIGHT CHECKS
 # =============================================================================
 
-setup: ## Set up complete development environment
-	@echo "$(GREEN)🚀 Setting up Oil & Gas Inventory System...$(NC)"
-	@$(MAKE) check-dependencies
-	@$(MAKE) setup-docker
-	@$(MAKE) wait-for-db
-	@$(MAKE) migrate-db
-	@$(MAKE) setup-complete
-
-check-dependencies: ## Check required dependencies
+check-deps: ## Check required dependencies
 	@echo "$(YELLOW)📋 Checking dependencies...$(NC)"
-	@command -v docker >/dev/null 2>&1 || { echo "$(RED)❌ Docker is required but not installed$(NC)"; exit 1; }
-	@command -v docker-compose >/dev/null 2>&1 || { echo "$(RED)❌ Docker Compose is required but not installed$(NC)"; exit 1; }
-	@command -v go >/dev/null 2>&1 || { echo "$(RED)❌ Go is required but not installed$(NC)"; exit 1; }
+	@command -v docker >/dev/null 2>&1 || { echo "$(RED)❌ Docker required$(NC)"; exit 1; }
+	@command -v docker-compose >/dev/null 2>&1 || { echo "$(RED)❌ Docker Compose required$(NC)"; exit 1; }
+	@command -v go >/dev/null 2>&1 || { echo "$(RED)❌ Go required$(NC)"; exit 1; }
+	@command -v mdb-tables >/dev/null 2>&1 || { echo "$(RED)❌ mdb-tools required$(NC)"; exit 1; }
 	@echo "$(GREEN)✅ All dependencies found$(NC)"
-
-setup-docker: ## Start Docker containers
-	@echo "$(YELLOW)🐳 Starting Docker containers...$(NC)"
-	@docker-compose up -d postgres postgres-test
-	@echo "$(GREEN)✅ PostgreSQL containers started$(NC)"
-
-setup-docker-full: ## Start all Docker containers including PgAdmin
-	@echo "$(YELLOW)🐳 Starting all Docker containers...$(NC)"
-	@docker-compose up -d
-	@echo "$(GREEN)✅ All containers started$(NC)"
-	@echo "$(GREEN)🎯 Access points:$(NC)"
-	@echo "  • PostgreSQL Dev:  localhost:5432"
-	@echo "  • PostgreSQL Test: localhost:5433" 
-	@echo "  • PgAdmin:         http://localhost:8080"
-
-wait-for-db: ## Wait for databases to be ready
-	@echo "$(YELLOW)⏳ Waiting for databases to be ready...$(NC)"
-	@timeout=60; \
-	while [ $$timeout -gt 0 ]; do \
-		if docker-compose exec -T postgres pg_isready -U oilgas_user -d oilgas_dev >/dev/null 2>&1 && \
-		   docker-compose exec -T postgres-test pg_isready -U oilgas_test_user -d oilgas_test >/dev/null 2>&1; then \
-			echo "$(GREEN)✅ Databases are ready$(NC)"; \
-			break; \
-		fi; \
-		echo "Waiting for databases... ($$timeout seconds remaining)"; \
-		sleep 2; \
-		timeout=$$((timeout-2)); \
-	done; \
-	if [ $$timeout -eq 0 ]; then \
-		echo "$(RED)❌ Databases failed to start within timeout$(NC)"; \
-		exit 1; \
-	fi
-
-# =============================================================================
-# Database Migration
-# =============================================================================
-
-migrate-db: ## Run database migrations
-	@echo "$(YELLOW)📊 Running database migrations...$(NC)"
-	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -f /docker-entrypoint-initdb.d/001_init_database.sql
-	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -f /docker-entrypoint-initdb.d/migrations/001_create_customers.sql
-	@docker-compose exec -T postgres-test psql -U oilgas_test_user -d oilgas_test -f /docker-entrypoint-initdb.d/001_init_database.sql
-	@docker-compose exec -T postgres-test psql -U oilgas_test_user -d oilgas_test -f /docker-entrypoint-initdb.d/migrations/001_create_customers.sql
-	@echo "$(GREEN)✅ Database migrations completed$(NC)"
-
-# =============================================================================
-# MDB Migration (Phase 1 to PostgreSQL)
-# =============================================================================
 
 check-mdb: ## Check if MDB file exists and is accessible
 	@echo "$(YELLOW)🔍 Checking MDB file...$(NC)"
 	@if [ ! -f "$(MDB_FILE)" ]; then \
 		echo "$(RED)❌ MDB file not found: $(MDB_FILE)$(NC)"; \
-		echo "$(YELLOW)💡 Please ensure your Access database is at: $(MDB_FILE)$(NC)"; \
+		echo "$(YELLOW)💡 Please place your Access database at: $(MDB_FILE)$(NC)"; \
 		exit 1; \
 	fi
 	@echo "$(GREEN)✅ MDB file found: $(MDB_FILE)$(NC)"
-	@if command -v mdb-tables >/dev/null 2>&1; then \
-		echo "$(GREEN)✅ mdb-tools available$(NC)"; \
+	@echo "$(BLUE)📊 MDB Contents:$(NC)"
+	@mdb-tables "$(MDB_FILE)" | tr ' ' '\n' | sort | head -10
+
+analyze-mdb: check-mdb ## Analyze MDB structure and export customers
+	@echo "$(YELLOW)📊 Analyzing MDB structure...$(NC)"
+	@mkdir -p database/data/exported database/logs
+	@echo "Tables in $(MDB_FILE):" > database/logs/mdb_analysis.log
+	@mdb-tables "$(MDB_FILE)" >> database/logs/mdb_analysis.log
+	@echo "" >> database/logs/mdb_analysis.log
+	@echo "Exporting customers table..." | tee -a database/logs/mdb_analysis.log
+	@if mdb-export "$(MDB_FILE)" customers > database/data/exported/customers.csv 2>>database/logs/mdb_analysis.log; then \
+		echo "$(GREEN)✅ Customers exported successfully$(NC)"; \
+		RECORD_COUNT=$$(wc -l < database/data/exported/customers.csv); \
+		echo "   Records: $$((RECORD_COUNT - 1)) (excluding header)"; \
 	else \
-		echo "$(RED)❌ mdb-tools not installed$(NC)"; \
-		echo "$(YELLOW)💡 Install with: brew install mdbtools (macOS) or apt-get install mdb-tools (Ubuntu)$(NC)"; \
+		echo "$(RED)❌ Failed to export customers table$(NC)"; \
+		echo "$(YELLOW)💡 Check available tables: make list-tables$(NC)"; \
 		exit 1; \
 	fi
 
-phase1-export: check-mdb ## Export MDB data to CSV (Phase 1)
-	@echo "$(YELLOW)📤 Exporting MDB data to CSV...$(NC)"
-	@mkdir -p database/data/exported database/data/clean database/logs
-	@echo "Exporting customers table..."
-	@if mdb-export "$(MDB_FILE)" customers > database/data/exported/customers.csv 2>/dev/null; then \
-		echo "$(GREEN)✅ Customers exported$(NC)"; \
-	else \
-		echo "$(YELLOW)⚠️  Customers table not found or empty$(NC)"; \
+analyze-customers: ## Analyze exported customer CSV structure
+	@echo "$(YELLOW)🔍 Analyzing customer CSV structure...$(NC)"
+	@if [ ! -f "database/data/exported/customers.csv" ]; then \
+		echo "$(RED)❌ No customer CSV found. Run 'make analyze-mdb' first$(NC)"; \
+		exit 1; \
 	fi
-	@echo "$(GREEN)✅ MDB export completed$(NC)"
+	@echo "Building customer analyzer..."
+	@cd backend && go build -o ../customer-analyzer cmd/tools/customer-analyzer/main.go
+	@echo "$(BLUE)📊 Customer CSV Analysis:$(NC)"
+	@./customer-analyzer database/data/exported/customers.csv
 
-phase1-clean: ## Clean and normalize exported CSV data
-	@echo "$(YELLOW)🧹 Cleaning and normalizing CSV data...$(NC)"
-	@go run backend/cmd/tools/csv-cleaner/main.go \
-		-input database/data/exported \
-		-output database/data/clean \
-		-log database/logs/cleaning.log
-	@echo "$(GREEN)✅ Data cleaning completed$(NC)"
-
-phase1-complete: ## Complete Phase 1 migration (export + clean)
-	@echo "$(GREEN)🎯 Running complete Phase 1 migration...$(NC)"
-	@$(MAKE) phase1-export
-	@$(MAKE) phase1-clean
-	@echo "$(GREEN)✅ Phase 1 migration completed$(NC)"
-	@echo "$(GREEN)📁 Cleaned data available in: database/data/clean/$(NC)"
+list-tables: check-mdb ## List all tables in MDB file
+	@echo "$(BLUE)📋 Tables in $(MDB_FILE):$(NC)"
+	@mdb-tables "$(MDB_FILE)" | tr ' ' '\n' | sort | nl
 
 # =============================================================================
-# Data Import (Phase 1 CSV to PostgreSQL)
+# DATABASE SETUP
 # =============================================================================
 
-build-migrator: ## Build the data migration tool
-	@echo "$(YELLOW)🔨 Building migration tool...$(NC)"
-	@cd backend && go build -o ../migrator cmd/migrator/main.go
-	@echo "$(GREEN)✅ Migration tool built$(NC)"
+setup-db: check-deps ## Setup PostgreSQL databases
+	@echo "$(YELLOW)🐳 Setting up PostgreSQL databases...$(NC)"
+	@docker-compose down 2>/dev/null || true
+	@docker-compose up -d postgres postgres-test
+	@echo "$(YELLOW)⏳ Waiting for databases...$(NC)"
+	@timeout=60; \
+	while [ $$timeout -gt 0 ]; do \
+		if docker-compose exec -T postgres pg_isready -U oilgas_user -d oilgas_dev >/dev/null 2>&1 && \
+		   docker-compose exec -T postgres-test pg_isready -U oilgas_test_user -d oilgas_test >/dev/null 2>&1; then \
+			echo "$(GREEN)✅ Databases ready$(NC)"; \
+			break; \
+		fi; \
+		echo "   Waiting... ($$timeout seconds remaining)"; \
+		sleep 2; \
+		timeout=$$((timeout-2)); \
+	done; \
+	if [ $$timeout -eq 0 ]; then \
+		echo "$(RED)❌ Database timeout$(NC)"; \
+		exit 1; \
+	fi
 
-import-data: build-migrator ## Import cleaned CSV data to PostgreSQL
-	@echo "$(YELLOW)📥 Importing data to PostgreSQL...$(NC)"
-	@DEV_DATABASE_URL="$(DEV_DATABASE_URL)" \
-	 TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
-	 DATA_PATH="$(DATA_PATH)" \
-	 TENANT_ID="$(TENANT_ID)" \
-	 ./migrator
-	@echo "$(GREEN)✅ Data import completed$(NC)"
-
-import-data-dry-run: build-migrator ## Dry run data import (no actual changes)
-	@echo "$(YELLOW)🔍 Running data import dry run...$(NC)"
-	@DEV_DATABASE_URL="$(DEV_DATABASE_URL)" \
-	 TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
-	 DATA_PATH="$(DATA_PATH)" \
-	 TENANT_ID="$(TENANT_ID)" \
-	 DRY_RUN=true \
-	 ./migrator
-	@echo "$(GREEN)✅ Dry run completed$(NC)"
-
-import-docker: ## Run data import using Docker
-	@echo "$(YELLOW)🐳 Running data import with Docker...$(NC)"
-	@docker-compose run --rm migrator
-	@echo "$(GREEN)✅ Docker data import completed$(NC)"
+migrate-db: ## Run database migrations
+	@echo "$(YELLOW)📊 Running database migrations...$(NC)"
+	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -f /docker-entrypoint-initdb.d/001_init_database.sql
+	@docker-compose exec -T postgres-test psql -U oilgas_test_user -d oilgas_test -f /docker-entrypoint-initdb.d/001_init_database.sql
+	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -f /docker-entrypoint-initdb.d/migrations/001_create_customers_standardized.sql
+	@docker-compose exec -T postgres-test psql -U oilgas_test_user -d oilgas_test -f /docker-entrypoint-initdb.d/migrations/001_create_customers_standardized.sql
+	@echo "$(GREEN)✅ Database migrations completed$(NC)"
 
 # =============================================================================
-# Complete Migration Workflow
+# CUSTOMER DATA PROCESSING
 # =============================================================================
 
-migrate-complete: ## Complete migration workflow (MDB → CSV → PostgreSQL)
-	@echo "$(GREEN)🚀 Starting complete migration workflow...$(NC)"
-	@echo "$(GREEN)Step 1: Phase 1 - Export and clean MDB data$(NC)"
-	@$(MAKE) phase1-complete
-	@echo ""
-	@echo "$(GREEN)Step 2: Setup PostgreSQL containers$(NC)"
-	@$(MAKE) setup-docker
-	@$(MAKE) wait-for-db
-	@echo ""
-	@echo "$(GREEN)Step 3: Run database migrations$(NC)"
+clean-customers: ## Clean customer data with deduplication
+	@echo "$(YELLOW)🧹 Cleaning customer data...$(NC)"
+	@if [ ! -f "database/data/exported/customers.csv" ]; then \
+		echo "$(RED)❌ No exported customers found. Run 'make analyze-mdb' first$(NC)"; \
+		exit 1; \
+	fi
+	@echo "Building customer cleaner..."
+	@cd backend && go build -o ../customer-cleaner cmd/customer-cleaner/main.go
+	@mkdir -p database/data/clean database/logs
+	@echo "Cleaning customer data with standards and deduplication..."
+	@./customer-cleaner database/data/exported/customers.csv database/data/clean/customers_cleaned.csv $(TENANT_ID)
+	@echo "$(GREEN)✅ Customer data cleaned$(NC)"
+
+import-customers: ## Import cleaned customers to database
+	@echo "$(YELLOW)📥 Importing customers to database...$(NC)"
+	@if [ ! -f "database/data/clean/customers_cleaned.csv" ]; then \
+		echo "$(RED)❌ No cleaned customers found. Run 'make clean-customers' first$(NC)"; \
+		exit 1; \
+	fi
+	@echo "Building standardized importer..."
+	@cd backend && go build -o ../standardized-importer cmd/standardized-importer/main.go
+	@echo "Importing to development database..."
+	@DATABASE_URL="$(DEV_DATABASE_URL)" ./standardized-importer database/data/clean/customers_cleaned.csv $(TENANT_ID)
+	@echo "Importing to test database..."
+	@DATABASE_URL="$(TEST_DATABASE_URL)" ./standardized-importer database/data/clean/customers_cleaned.csv $(TENANT_ID)
+	@echo "$(GREEN)✅ Customer import completed$(NC)"
+
+# =============================================================================
+# COMPLETE WORKFLOW COMMANDS
+# =============================================================================
+
+setup-customers: check-deps check-mdb ## Complete customer setup workflow
+	@echo "$(GREEN)🚀 Complete Customer Setup Workflow$(NC)"
+	@echo "====================================="
+	@$(MAKE) analyze-mdb
+	@$(MAKE) analyze-customers
+	@$(MAKE) setup-db
 	@$(MAKE) migrate-db
+	@$(MAKE) clean-customers
+	@$(MAKE) import-customers
 	@echo ""
-	@echo "$(GREEN)Step 4: Import customer data$(NC)"
-	@$(MAKE) import-data
-	@echo ""
-	@echo "$(GREEN)🎉 Complete migration workflow finished!$(NC)"
-	@$(MAKE) migration-summary
+	@echo "$(GREEN)🎉 Customer setup completed successfully!$(NC)"
+	@$(MAKE) verify-customers
 
-migration-summary: ## Show migration summary and next steps
-	@echo ""
-	@echo "$(GREEN)📊 Migration Summary$(NC)"
-	@echo "===================="
-	@echo "$(GREEN)✅ MDB data exported and cleaned$(NC)"
-	@echo "$(GREEN)✅ PostgreSQL containers running$(NC)"
-	@echo "$(GREEN)✅ Database schema created$(NC)"
-	@echo "$(GREEN)✅ Customer data imported$(NC)"
-	@echo ""
-	@echo "$(YELLOW)🎯 Next Steps:$(NC)"
-	@echo "1. Start development server: make dev"
-	@echo "2. Run tests: make test"
-	@echo "3. Access PgAdmin: make setup-docker-full then http://localhost:8080"
-	@echo ""
-	@echo "$(YELLOW)📁 Important Files:$(NC)"
-	@echo "• Migration logs: database/logs/"
-	@echo "• Cleaned data: database/data/clean/"
-	@echo "• Database URL: $(DEV_DATABASE_URL)"
+quick-setup: ## Quick setup (skip analysis steps)
+	@echo "$(GREEN)⚡ Quick Customer Setup$(NC)"
+	@$(MAKE) setup-db
+	@$(MAKE) migrate-db
+	@echo "$(GREEN)✅ Quick setup completed$(NC)"
 
 # =============================================================================
-# Development and Testing
+# VERIFICATION AND TESTING
+# =============================================================================
+
+verify-customers: ## Verify customer data was imported correctly
+	@echo "$(YELLOW)🔍 Verifying customer data...$(NC)"
+	@echo "$(BLUE)Development Database:$(NC)"
+	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "\
+		SELECT \
+			COUNT(*) as total_customers, \
+			COUNT(CASE WHEN is_deleted = false THEN 1 END) as active_customers, \
+			COUNT(CASE WHEN email_address IS NOT NULL THEN 1 END) as customers_with_email, \
+			COUNT(CASE WHEN color_grade_1 IS NOT NULL THEN 1 END) as customers_with_colors \
+		FROM store.customers;"
+	@echo ""
+	@echo "$(BLUE)Sample customers:$(NC)"
+	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "\
+		SELECT customer_id, customer_name, billing_state, \
+			CASE WHEN email_address IS NOT NULL THEN '✓' ELSE '✗' END as email, \
+			CASE WHEN color_grade_1 IS NOT NULL THEN '✓' ELSE '✗' END as colors \
+		FROM store.customers WHERE is_deleted = false ORDER BY customer_id LIMIT 5;"
+
+check-duplicates: ## Check for potential customer duplicates
+	@echo "$(YELLOW)🔍 Checking for customer duplicates...$(NC)"
+	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "\
+		SELECT * FROM detect_customer_duplicates('$(TENANT_ID)');"
+
+show-customers: ## Show current customers in database
+	@echo "$(BLUE)📋 Current customers:$(NC)"
+	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "\
+		SELECT customer_id, customer_name, billing_city, billing_state, \
+			CASE WHEN is_deleted THEN 'Deleted' ELSE 'Active' END as status \
+		FROM store.customers ORDER BY customer_id LIMIT 10;"
+
+test-customer-domain: ## Run customer domain tests
+	@echo "$(YELLOW)🧪 Running customer domain tests...$(NC)"
+	@cd backend && go test ./internal/customer/... -v
+
+# =============================================================================
+# DATABASE MANAGEMENT
+# =============================================================================
+
+db-status: ## Show database status
+	@echo "$(BLUE)📊 Database Status:$(NC)"
+	@echo "Development Database:"
+	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "\
+		SELECT \
+			current_database() as database, \
+			current_user as user, \
+			version() as version;" 2>/dev/null || echo "$(RED)❌ Dev database not accessible$(NC)"
+	@echo ""
+	@echo "Test Database:"
+	@docker-compose exec -T postgres-test psql -U oilgas_test_user -d oilgas_test -c "\
+		SELECT current_database() as database, current_user as user;" 2>/dev/null || echo "$(RED)❌ Test database not accessible$(NC)"
+
+db-reset: ## Reset databases (WARNING: destroys all data)
+	@echo "$(RED)⚠️  WARNING: This will destroy all database data!$(NC)"
+	@read -p "Are you sure? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
+	@docker-compose down -v
+	@docker volume rm $$(docker volume ls -q | grep postgres) 2>/dev/null || true
+	@echo "$(GREEN)✅ Databases reset - run 'make setup-db' to recreate$(NC)"
+
+start-pgadmin: ## Start PgAdmin for database management
+	@echo "$(YELLOW)🖥️  Starting PgAdmin...$(NC)"
+	@docker-compose up -d pgadmin
+	@echo "$(GREEN)✅ PgAdmin started$(NC)"
+	@echo "$(BLUE)🌐 Access at: http://localhost:8080$(NC)"
+	@echo "   Email: admin@oilgas.local"
+	@echo "   Password: admin123"
+
+# =============================================================================
+# DEVELOPMENT
 # =============================================================================
 
 dev: ## Start development server
 	@echo "$(YELLOW)🚀 Starting development server...$(NC)"
 	@cd backend && go run cmd/server/main.go
 
-test: ## Run tests
+build: ## Build all applications
+	@echo "$(YELLOW)🔨 Building applications...$(NC)"
+	@cd backend && go build -o ../customer-cleaner cmd/customer-cleaner/main.go
+	@cd backend && go build -o ../customer-analyzer cmd/tools/customer-analyzer/main.go
+	@cd backend && go build -o ../standardized-importer cmd/standardized-importer/main.go
+	@echo "$(GREEN)✅ Build completed$(NC)"
+
+test: ## Run all tests
 	@echo "$(YELLOW)🧪 Running tests...$(NC)"
-	@cd backend && go test ./internal/...
-
-test-customer: ## Run customer domain tests
-	@echo "$(YELLOW)🧪 Running customer domain tests...$(NC)"
-	@cd backend && go test ./internal/customer/...
+	@cd backend && go test ./... -v
 
 # =============================================================================
-# Database Management
-# =============================================================================
-
-db-status: ## Show database status
-	@echo "$(YELLOW)📊 Database Status$(NC)"
-	@echo "=================="
-	@echo "Dev Database:"
-	@docker-compose exec -T postgres psql "$(DEV_DATABASE_URL)" -c "\l" 2>/dev/null || echo "$(RED)❌ Dev database not accessible$(NC)"
-	@echo ""
-	@echo "Test Database:"
-	@docker-compose exec -T postgres-test psql "$(TEST_DATABASE_URL)" -c "\l" 2>/dev/null || echo "$(RED)❌ Test database not accessible$(NC)"
-
-db-reset: ## Reset databases (WARNING: destroys all data)
-	@echo "$(RED)⚠️  WARNING: This will destroy all database data!$(NC)"
-	@read -p "Are you sure? (y/N): " confirm && [ "$$confirm" = "y" ]
-	@docker-compose down -v
-	@docker volume rm oilgas-postgres_postgres_data oilgas-postgres_postgres_test_data 2>/dev/null || true
-	@$(MAKE) setup-docker
-	@$(MAKE) wait-for-db
-	@$(MAKE) migrate-db
-	@echo "$(GREEN)✅ Databases reset$(NC)"
-
-db-logs: ## Show database logs
-	@echo "$(YELLOW)📋 Database Logs$(NC)"
-	@docker-compose logs postgres postgres-test
-
-# =============================================================================
-# Cleanup
+# CLEANUP
 # =============================================================================
 
 clean: ## Clean up generated files and containers
 	@echo "$(YELLOW)🧹 Cleaning up...$(NC)"
-	@docker-compose down
-	@rm -f migrator
-	@rm -rf database/logs/*
+	@docker-compose down 2>/dev/null || true
+	@rm -f customer-cleaner customer-analyzer standardized-importer
+	@rm -f database/data/exported/*.csv
+	@rm -f database/data/clean/*.csv
+	@rm -f database/logs/*.log
 	@echo "$(GREEN)✅ Cleanup completed$(NC)"
 
-clean-data: ## Clean up data files (keeps containers)
+clean-data: ## Clean up data files only (keep containers)
 	@echo "$(YELLOW)🧹 Cleaning data files...$(NC)"
-	@rm -rf database/data/exported/*
-	@rm -rf database/data/clean/*
-	@rm -rf database/logs/*
+	@rm -f customers.csv database/data/exported/*.csv database/data/clean/*.csv
+	@rm -f database/logs/*.log
 	@echo "$(GREEN)✅ Data files cleaned$(NC)"
 
-setup-complete:
-	@echo ""
-	@echo "$(GREEN)🎉 Setup completed successfully!$(NC)"
-	@echo ""
-	@echo "$(YELLOW)📋 What's available:$(NC)"
-	@echo "• PostgreSQL Dev:  localhost:5432 (oilgas_dev)"
-	@echo "• PostgreSQL Test: localhost:5433 (oilgas_test)"
-	@echo "• Customer domain: Enhanced with analytics and multi-tenant support"
-	@echo ""
-	@echo "$(YELLOW)🚀 Ready for development:$(NC)"
-	@echo "• Run 'make migrate-complete' to import your MDB data"
-	@echo "• Run 'make dev' to start the development server"
-	@echo "• Run 'make test-customer' to test customer domain"
+repo-cleanup: ## Run repository cleanup and optimization
+	@echo "$(YELLOW)🔧 Running repository cleanup...$(NC)"
+	@chmod +x cleanup_repository.sh
+	@./cleanup_repository.sh
+	@echo "$(GREEN)✅ Repository optimized$(NC)"
 
 # =============================================================================
-# Simple MDB to PostgreSQL Migration
+# UTILITIES
 # =============================================================================
 
-# Use your actual exported customers.csv file
-import-customers: ## Import customers.csv directly to PostgreSQL
-	@echo "$(YELLOW)📥 Importing customers.csv to PostgreSQL...$(NC)"
-	@echo "Building simple importer..."
-	@cd backend && go build -o ../simple-importer cmd/simple-importer/main.go
-	@echo "Running import..."
-	@DATABASE_URL="$(DEV_DATABASE_URL)" ./simple-importer customers.csv $(TENANT_ID)
-	@echo "$(GREEN)✅ Customer import completed$(NC)"
+logs: ## Show Docker container logs
+	@echo "$(BLUE)📋 Container logs:$(NC)"
+	@docker-compose logs postgres postgres-test
 
-import-customers-test: ## Import customers.csv to test database
-	@echo "$(YELLOW)📥 Importing customers.csv to test database...$(NC)"
-	@cd backend && go build -o ../simple-importer cmd/simple-importer/main.go
-	@DATABASE_URL="$(TEST_DATABASE_URL)" ./simple-importer customers.csv $(TENANT_ID)
-	@echo "$(GREEN)✅ Test customer import completed$(NC)"
-
-# Quick setup for your actual data
-quick-setup: ## Quick setup with your actual customers.csv
-	@echo "$(GREEN)🚀 Quick setup with actual customer data...$(NC)"
-	@$(MAKE) setup-docker
-	@$(MAKE) wait-for-db
-	@$(MAKE) migrate-simple
-	@$(MAKE) import-customers
-	@$(MAKE) verify-customers
-	@echo "$(GREEN)✅ Quick setup completed!$(NC)"
-
-migrate-simple: ## Run simplified customer migration
-	@echo "$(YELLOW)📊 Running simplified customer migration...$(NC)"
-	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -f /docker-entrypoint-initdb.d/001_init_database.sql
-	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -f /docker-entrypoint-initdb.d/migrations/001_create_customers_simplified.sql
-	@docker-compose exec -T postgres-test psql -U oilgas_test_user -d oilgas_test -f /docker-entrypoint-initdb.d/001_init_database.sql
-	@docker-compose exec -T postgres-test psql -U oilgas_test_user -d oilgas_test -f /docker-entrypoint-initdb.d/migrations/001_create_customers_simplified.sql
-	@echo "$(GREEN)✅ Simplified migrations completed$(NC)"
-
-verify-customers: ## Verify customer data was imported correctly
-	@echo "$(YELLOW)🔍 Verifying customer data...$(NC)"
-	@echo "Customer count:"
-	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "SELECT COUNT(*) as total_customers FROM store.customers;"
-	@echo ""
-	@echo "Sample customers:"
-	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "SELECT customer_id, customer, billingstate, CASE WHEN color1 IS NOT NULL THEN 'Yes' ELSE 'No' END as has_colors FROM store.customers LIMIT 5;"
-	@echo ""
-	@echo "Color system summary:"
-	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "SELECT COUNT(*) as customers_with_colors FROM store.customers WHERE color1 IS NOT NULL OR color2 IS NOT NULL;"
-	@echo ""
-	@echo "W-String summary:"
-	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "SELECT COUNT(*) as customers_with_wstring FROM store.customers WHERE wscolor1 IS NOT NULL OR wscolor2 IS NOT NULL;"
-
-# Analyze your actual CSV structure
-analyze-csv: ## Analyze the structure of customers.csv
-	@echo "$(YELLOW)🔍 Analyzing customers.csv structure...$(NC)"
-	@if [ -f "customers.csv" ]; then \
-		echo "File: customers.csv"; \
-		echo "Rows: $$(wc -l < customers.csv)"; \
-		echo ""; \
-		echo "Headers:"; \
-		head -1 customers.csv | tr ',' '\n' | nl; \
-		echo ""; \
-		echo "Sample data (first 3 rows):"; \
-		head -3 customers.csv; \
-		echo ""; \
-		echo "Data types detected:"; \
-		head -2 customers.csv | tail -1 | tr ',' '\n' | while read field; do \
-			if [[ "$$field" =~ ^[0-9]+$$ ]]; then \
-				echo "Integer: $$field"; \
-			elif [[ "$$field" =~ ^[0-9]+\.[0-9]+$$ ]]; then \
-				echo "Float: $$field"; \
-			elif [ -n "$$field" ]; then \
-				echo "String: $$field"; \
-			else \
-				echo "Empty: $$field"; \
-			fi; \
-		done; \
-	else \
-		echo "$(RED)❌ customers.csv not found$(NC)"; \
-		echo "Please ensure your exported CSV file is named 'customers.csv' and is in the project root."; \
-	fi
-
-# Clean up for fresh start
-reset-simple: ## Reset for fresh simple migration
-	@echo "$(YELLOW)🧹 Resetting for fresh migration...$(NC)"
-	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "TRUNCATE store.customers RESTART IDENTITY CASCADE;" 2>/dev/null || true
-	@docker-compose exec -T postgres-test psql -U oilgas_test_user -d oilgas_test -c "TRUNCATE store.customers RESTART IDENTITY CASCADE;" 2>/dev/null || true
-	@rm -f simple-importer
-	@echo "$(GREEN)✅ Reset completed$(NC)"
-
-# Show what's in your database
-show-customers: ## Show current customers in database
-	@echo "$(YELLOW)📋 Current customers in database:$(NC)"
-	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "\
-		SELECT \
-			customer_id, \
-			custid as orig_id, \
-			customer, \
-			billingstate as state, \
-			CASE WHEN email IS NOT NULL THEN '✓' ELSE '✗' END as email, \
-			CASE WHEN color1 IS NOT NULL THEN '✓' ELSE '✗' END as colors, \
-			CASE WHEN wscolor1 IS NOT NULL THEN '✓' ELSE '✗' END as wstring, \
-			deleted \
-		FROM store.customers \
-		ORDER BY customer_id \
-		LIMIT 10;"
-
-# Export current data for backup
-export-customers: ## Export current customer data to CSV
-	@echo "$(YELLOW)📤 Exporting current customer data...$(NC)"
+export-customers: ## Export current customers to CSV
+	@echo "$(YELLOW)📤 Exporting customers...$(NC)"
 	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "\
 		COPY ( \
-			SELECT custid, customer, billingaddress, billingcity, billingstate, billingzipcode, \
-				   contact, phone, fax, email, \
-				   color1, color2, color3, color4, color5, \
-				   loss1, loss2, loss3, loss4, loss5, \
-				   wscolor1, wscolor2, wscolor3, wscolor4, wscolor5, \
-				   wsloss1, wsloss2, wsloss3, wsloss4, wsloss5, \
-				   deleted \
-			FROM store.customers \
-			ORDER BY customer_id \
+			SELECT original_customer_id, customer_name, billing_address, billing_city, \
+				   billing_state, billing_zip_code, contact_name, phone_number, \
+				   email_address, is_deleted \
+			FROM store.customers ORDER BY customer_id \
 		) TO STDOUT WITH CSV HEADER;" > exported_customers_$(shell date +%Y%m%d_%H%M%S).csv
-	@echo "$(GREEN)✅ Exported to: exported_customers_$(shell date +%Y%m%d_%H%M%S).csv$(NC)"
+	@echo "$(GREEN)✅ Customers exported$(NC)"
 
 # =============================================================================
-# Help for simple migration
+# INFORMATION COMMANDS
 # =============================================================================
 
-help-simple: ## Show help for simple migration commands
-	@echo "$(CYAN)Simple Customer Migration Commands:$(NC)"
+info: ## Show current configuration
+	@echo "$(BLUE)ℹ️  Current Configuration:$(NC)"
+	@echo "MDB File: $(MDB_FILE)"
+	@echo "Tenant ID: $(TENANT_ID)"
+	@echo "Dev Database: $(DEV_DATABASE_URL)"
+	@echo "Test Database: $(TEST_DATABASE_URL)"
 	@echo ""
-	@echo "$(YELLOW)📋 Setup:$(NC)"
-	@echo "  make quick-setup           # Complete setup with your customers.csv"
-	@echo "  make analyze-csv           # Analyze your customers.csv structure"
+	@echo "$(BLUE)📁 Key Files:$(NC)"
+	@ls -la $(MDB_FILE) 2>/dev/null || echo "❌ MDB file not found"
+	@ls -la customers.csv 2>/dev/null || echo "ℹ️  No customers.csv (will be generated)"
+	@ls -la database/data/clean/customers_cleaned.csv 2>/dev/null || echo "ℹ️  No cleaned data yet"
+
+status: ## Show overall system status
+	@echo "$(BLUE)📊 System Status:$(NC)"
+	@echo "=================="
+	@echo -n "Docker: "; docker --version 2>/dev/null || echo "❌ Not installed"
+	@echo -n "Docker Compose: "; docker-compose --version 2>/dev/null || echo "❌ Not installed"
+	@echo -n "Go: "; go version 2>/dev/null || echo "❌ Not installed"
+	@echo -n "mdb-tools: "; mdb-tools --version 2>/dev/null || echo "❌ Not installed"
 	@echo ""
-	@echo "$(YELLOW)📥 Import:$(NC)"
-	@echo "  make import-customers      # Import customers.csv to development DB"
-	@echo "  make import-customers-test # Import customers.csv to test DB"
+	@echo -n "PostgreSQL containers: "; \
+		if docker-compose ps postgres postgres-test | grep -q "Up"; then \
+			echo "✅ Running"; \
+		else \
+			echo "❌ Not running"; \
+		fi
+	@echo -n "MDB file: "; \
+		if [ -f "$(MDB_FILE)" ]; then \
+			echo "✅ Found"; \
+		else \
+			echo "❌ Missing"; \
+		fi
+
+# =============================================================================
+# WORKFLOW HELPERS
+# =============================================================================
+
+first-time: ## Complete first-time setup workflow
+	@echo "$(GREEN)🎯 First-Time Setup for Oil & Gas Customer Migration$(NC)"
+	@echo "======================================================"
 	@echo ""
-	@echo "$(YELLOW)🔍 Verify:$(NC)"
-	@echo "  make verify-customers      # Check import was successful"
-	@echo "  make show-customers        # Display current customers"
+	@echo "$(YELLOW)This will:$(NC)"
+	@echo "1. Check all dependencies"
+	@echo "2. Verify your MDB file"
+	@echo "3. Set up PostgreSQL databases"
+	@echo "4. Analyze and import customer data"
+	@echo "5. Verify everything works"
 	@echo ""
-	@echo "$(YELLOW)🛠️  Manage:$(NC)"
-	@echo "  make reset-simple          # Reset for fresh migration"
-	@echo "  make export-customers      # Export current data to CSV"
+	@read -p "Continue? (y/N): " confirm && [ "$confirm" = "y" ] || exit 1
+	@$(MAKE) check-deps
+	@$(MAKE) check-mdb
+	@$(MAKE) setup-customers
 	@echo ""
-	@echo "$(YELLOW)📁 Required Files:$(NC)"
-	@echo "  • customers.csv            # Your exported MDB customer data"
-	@echo "  • docker-compose.yml       # Docker configuration"
+	@echo "$(GREEN)🎉 First-time setup completed successfully!$(NC)"
 	@echo ""
-	@echo "$(YELLOW)🎯 Quick Start:$(NC)"
-	@echo "  1. Place your customers.csv in the project root"
-	@echo "  2. Run: make quick-setup"
-	@echo "  3. Verify: make show-customers"
+	@echo "$(BLUE)Next steps:$(NC)"
+	@echo "• Run 'make dev' to start development server"
+	@echo "• Run 'make start-pgadmin' to access database GUI"
+	@echo "• Check 'make help' for all available commands"
+
+troubleshoot: ## Show troubleshooting information
+	@echo "$(YELLOW)🔧 Troubleshooting Information$(NC)"
+	@echo "================================"
+	@echo ""
+	@echo "$(BLUE)Common Issues:$(NC)"
+	@echo ""
+	@echo "1. MDB file not found:"
+	@echo "   Place your Access database at: $(MDB_FILE)"
+	@echo ""
+	@echo "2. mdb-tools not installed:"
+	@echo "   macOS: brew install mdbtools"
+	@echo "   Ubuntu: sudo apt-get install mdb-tools"
+	@echo ""
+	@echo "3. Docker not running:"
+	@echo "   Start Docker Desktop or Docker daemon"
+	@echo ""
+	@echo "4. Database connection failed:"
+	@echo "   Run: make db-status"
+	@echo "   Try: make db-reset && make setup-db"
+	@echo ""
+	@echo "5. Customer export failed:"
+	@echo "   Check available tables: make list-tables"
+	@echo "   Your table might have a different name"
+	@echo ""
+	@echo "$(BLUE)Log Files:$(NC)"
+	@ls -la database/logs/ 2>/dev/null || echo "No logs yet"
+	@echo ""
+	@echo "$(BLUE)Current Status:$(NC)"
+	@$(MAKE) status
+
+# =============================================================================
+# DOCUMENTATION
+# =============================================================================
+
+docs: ## Show documentation links
+	@echo "$(BLUE)📚 Documentation:$(NC)"
+	@echo "==================="
+	@echo "• Customer Migration: docs/CUSTOMER_MIGRATION.md"
+	@echo "• Database Schema: docs/DATABASE_SCHEMA.md"
+	@echo "• Data Standards: docs/DATA_CONVERSION_STANDARDS.md"
+	@echo ""
+	@echo "$(BLUE)🌐 Web Resources:$(NC)"
+	@echo "• PgAdmin (if running): http://localhost:8080"
+	@echo "• API Health Check: http://localhost:8000/health"
+
+help-advanced: ## Show advanced commands
+	@echo "$(BLUE)🔧 Advanced Commands:$(NC)"
+	@echo "======================"
+	@echo ""
+	@echo "$(YELLOW)Database Management:$(NC)"
+	@echo "  make db-reset           # Reset all databases (destructive)"
+	@echo "  make start-pgadmin      # Start database GUI"
+	@echo "  make export-customers   # Export current data to CSV"
+	@echo ""
+	@echo "$(YELLOW)Data Processing:$(NC)"
+	@echo "  make analyze-customers  # Analyze CSV structure"
+	@echo "  make check-duplicates   # Check for duplicate customers"
+	@echo "  make clean-customers    # Clean data with deduplication"
+	@echo ""
+	@echo "$(YELLOW)Development:$(NC)"
+	@echo "  make test-customer-domain # Run customer domain tests"
+	@echo "  make build              # Build all tools"
+	@echo "  make dev                # Start development server"
+	@echo ""
+	@echo "$(YELLOW)Troubleshooting:$(NC)"
+	@echo "  make troubleshoot       # Show troubleshooting guide"
+	@echo "  make status             # Show system status"
+	@echo "  make logs               # Show container logs"
+
+.DEFAULT_GOAL := help

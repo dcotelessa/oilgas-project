@@ -1,7 +1,0 @@
-# Script outputs
-*.log
-*.tmp
-
-# OS files
-.DS_Store
-Thumbs.db

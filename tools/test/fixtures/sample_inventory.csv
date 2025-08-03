@@ -1,4 +1,0 @@
-WorkOrder,CustomerID,Customer,Joints,Size,Weight,Grade,Connection,DateIn
-"LB-001001",1,"Permian Basin Energy",100,"5 1/2\"",2500.50,"L80","BTC","2024-01-15"
-"LB-001002",2,"Eagle Ford Solutions",150,"7\"",4200.75,"P110","VAM TOP","2024-01-16"
-"LB-001003",3,"Bakken Industries",75,"9 5/8\"",6800.25,"N80","LTC","2024-01-17"

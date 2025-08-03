@@ -1,6 +1,0 @@
-WorkOrder,Customer,Joints,Size,Grade,Connection,Weight,DateIn
-LB-001001,chevron corporation,100,5.5,J-55,BUTTRESS THREAD CASING,2500.50,2024-01-15
-LB-001002,exxon mobil corp,150,7,L-80,BTC,4200.75,2024-01-16
-LB-001003,conocophillips company,75,Nine 5/8,P-110,VAM TOP,6800.25,2024-01-17
-LB-001004,Test Company LLC,200,4.5,N-80,LTC,1800.00,2024-01-18
-INVALID-FORMAT,sample customer,50,invalid size,X99,UNKNOWN,abc,invalid-date
