@@ -3,868 +3,469 @@ package main
 
 import (
 	"database/sql"
+	"encoding/csv"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
+	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 )
 
-// TenantMigrator handles multi-tenant database operations
-type TenantMigrator struct {
-	baseDB   *sql.DB
-	tenantDB *sql.DB
-	tenantID string
+type MigrationConfig struct {
+	DevDatabaseURL  string
+	TestDatabaseURL string
+	DataPath        string
+	LogPath         string
+	TenantID        string
+	BatchSize       int
+	DryRun          bool
+}
+
+type MigrationStats struct {
+	TablesProcessed int
+	RecordsInserted int
+	RecordsSkipped  int
+	ErrorCount      int
+	StartTime       time.Time
+	EndTime         time.Time
 }
 
 func main() {
-	// Load environment variables
-	if err := godotenv.Load(".env"); err != nil {
-		log.Printf("Warning: Could not load .env file: %v", err)
+	config := MigrationConfig{
+		DevDatabaseURL:  getEnv("DEV_DATABASE_URL", "postgresql://oilgas_user:oilgas_pass@localhost:5432/oilgas_dev"),
+		TestDatabaseURL: getEnv("TEST_DATABASE_URL", "postgresql://oilgas_test_user:oilgas_test_pass@localhost:5433/oilgas_test"),
+		DataPath:        getEnv("DATA_PATH", "/app/data"),
+		LogPath:         getEnv("LOG_PATH", "/app/logs"),
+		TenantID:        getEnv("TENANT_ID", "local-dev"),
+		BatchSize:       getEnvInt("BATCH_SIZE", 1000),
+		DryRun:          getEnvBool("DRY_RUN", false),
 	}
 
-	if len(os.Args) < 2 {
-		showHelp()
-		os.Exit(1)
+	log.Printf("Starting MDB to PostgreSQL migration...")
+	log.Printf("Data path: %s", config.DataPath)
+	log.Printf("Tenant ID: %s", config.TenantID)
+	log.Printf("Dry run: %t", config.DryRun)
+
+	// Create log directory
+	os.MkdirAll(config.LogPath, 0755)
+
+	// Run migration for dev database
+	if err := runMigration("development", config.DevDatabaseURL, config); err != nil {
+		log.Fatalf("Development migration failed: %v", err)
 	}
 
-	command := os.Args[1]
-
-	// Handle tenant-specific commands
-	switch command {
-	case "tenant-create":
-		handleTenantCreate()
-	case "csv-import":
-		handleCSVImport()
-	case "tenant-status":
-		handleTenantStatus()
-	case "tenant-drop":
-		handleTenantDrop()
-	case "tenant-list":
-		handleTenantList()
-	case "generate":
-		handleGenerate()
-	case "migrate":
-		handleMigrate()
-	case "seed":
-		handleSeed()
-	case "status":
-		handleStatus()
-	case "reset":
-		handleReset()
-	default:
-		log.Fatalf("Unknown command: %s", command)
+	// Run migration for test database  
+	if err := runMigration("test", config.TestDatabaseURL, config); err != nil {
+		log.Fatalf("Test migration failed: %v", err)
 	}
+
+	log.Printf("Migration completed successfully!")
 }
 
-func showHelp() {
-	fmt.Println("Oil & Gas Inventory System - Database Migrator")
-	fmt.Println()
-	fmt.Println("Standard Commands:")
-	fmt.Println("  migrator migrate [env]        - Run migrations")
-	fmt.Println("  migrator seed [env]           - Seed database")
-	fmt.Println("  migrator status [env]         - Show status")
-	fmt.Println("  migrator reset [env]          - Reset database")
-	fmt.Println("  migrator generate [env]       - Generate migration files")
-	fmt.Println()
-	fmt.Println("Tenant Commands:")
-	fmt.Println("  migrator tenant-create <id>   - Create tenant database")
-	fmt.Println("  migrator csv-import <id> <dir> - Import CSV to tenant")
-	fmt.Println("  migrator tenant-status <id>   - Check tenant status")
-	fmt.Println("  migrator tenant-drop <id>     - Drop tenant database")
-	fmt.Println("  migrator tenant-list          - List all tenant databases")
-	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("  migrator generate local")
-	fmt.Println("  migrator migrate local")
-	fmt.Println("  migrator tenant-create longbeach")
-	fmt.Println("  migrator csv-import longbeach ../csv/longbeach/")
-	fmt.Println()
-	fmt.Println("Environments: local, test, production")
-}
+func runMigration(environment, databaseURL string, config MigrationConfig) error {
+	log.Printf("Migrating to %s database...", environment)
 
-// ============================================================================
-// COMMAND HANDLERS
-// ============================================================================
-
-func handleGenerate() {
-	env := "local"
-	if len(os.Args) > 2 {
-		env = os.Args[2]
-	}
-	
-	fmt.Printf("🔄 Generating migration files for environment: %s\n", env)
-	
-	if err := generateMigrationFiles(env); err != nil {
-		log.Fatalf("Failed to generate migration files: %v", err)
-	}
-	
-	fmt.Println("✅ Migration files generated successfully!")
-	fmt.Println("📁 Generated files:")
-	fmt.Println("   migrations/001_store_schema.sql")
-	fmt.Println("   migrations/002_auth_schema.sql")
-	fmt.Println("   migrations/003_seed_data.sql")
-	fmt.Println()
-	fmt.Println("🚀 Next steps:")
-	fmt.Println("   migrator migrate local    # Execute generated migrations")
-}
-
-func handleMigrate() {
-	env := "local"
-	if len(os.Args) > 2 {
-		env = os.Args[2]
-	}
-	
-	fmt.Printf("🚀 Running migrations for environment: %s\n", env)
-	
-	db, err := connectDatabase(env)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-	defer db.Close()
-	
-	if err := runMigrations(db); err != nil {
-		log.Fatalf("Migration failed: %v", err)
-	}
-	
-	fmt.Println("✅ Migrations completed successfully!")
-}
-
-func handleSeed() {
-	env := "local"
-	if len(os.Args) > 2 {
-		env = os.Args[2]
-	}
-	
-	fmt.Printf("🌱 Seeding database for environment: %s\n", env)
-	
-	db, err := connectDatabase(env)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-	defer db.Close()
-	
-	if err := runSeeds(db); err != nil {
-		log.Fatalf("Seeding failed: %v", err)
-	}
-	
-	fmt.Println("✅ Database seeded successfully!")
-}
-
-func handleStatus() {
-	env := "local"
-	if len(os.Args) > 2 {
-		env = os.Args[2]
-	}
-	
-	fmt.Printf("📊 Database status for environment: %s\n", env)
-	
-	db, err := connectDatabase(env)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-	defer db.Close()
-	
-	if err := showStatus(db); err != nil {
-		log.Fatalf("Status check failed: %v", err)
-	}
-}
-
-func handleReset() {
-	env := "local"
-	if len(os.Args) > 2 {
-		env = os.Args[2]
-	}
-	
-	fmt.Printf("⚠️  WARNING: This will drop all data in %s environment\n", env)
-	fmt.Print("Type 'yes' to confirm: ")
-	
-	var confirmation string
-	fmt.Scanln(&confirmation)
-	if confirmation != "yes" {
-		fmt.Println("Operation cancelled")
-		os.Exit(0)
-	}
-	
-	db, err := connectDatabase(env)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-	defer db.Close()
-	
-	if err := resetDatabase(db); err != nil {
-		log.Fatalf("Reset failed: %v", err)
-	}
-	
-	fmt.Println("✅ Database reset completed!")
-}
-
-// ============================================================================
-// TENANT COMMAND HANDLERS
-// ============================================================================
-
-func handleTenantCreate() {
-	if len(os.Args) != 3 {
-		log.Fatalf("Usage: migrator tenant-create <tenant_id>")
-	}
-	tenantID := os.Args[2]
-	
-	if err := validateTenantID(tenantID); err != nil {
-		log.Fatalf("Invalid tenant ID: %v", err)
-	}
-	
-	tm, err := NewTenantMigrator(tenantID)
-	if err != nil {
-		log.Fatalf("Failed to create tenant migrator: %v", err)
-	}
-	defer tm.Close()
-	
-	if err := tm.CreateTenantDatabase(); err != nil {
-		log.Fatalf("Tenant creation failed: %v", err)
-	}
-	
-	log.Printf("✅ Tenant database created: oilgas_%s", tenantID)
-}
-
-func handleCSVImport() {
-	if len(os.Args) != 4 {
-		log.Fatalf("Usage: migrator csv-import <tenant_id> <csv_directory>")
-	}
-	tenantID := os.Args[2]
-	csvDir := os.Args[3]
-	
-	if err := validateTenantID(tenantID); err != nil {
-		log.Fatalf("Invalid tenant ID: %v", err)
-	}
-	
-	tm, err := NewTenantMigrator(tenantID)
-	if err != nil {
-		log.Fatalf("Failed to create tenant migrator: %v", err)
-	}
-	defer tm.Close()
-	
-	if err := tm.ImportCSVData(csvDir); err != nil {
-		log.Fatalf("CSV import failed: %v", err)
-	}
-	
-	log.Printf("✅ CSV data imported to tenant: %s", tenantID)
-}
-
-func handleTenantStatus() {
-	if len(os.Args) != 3 {
-		log.Fatalf("Usage: migrator tenant-status <tenant_id>")
-	}
-	tenantID := os.Args[2]
-	
-	tm, err := NewTenantMigrator(tenantID)
-	if err != nil {
-		log.Fatalf("Failed to create tenant migrator: %v", err)
-	}
-	defer tm.Close()
-	
-	if err := tm.ShowTenantStatus(); err != nil {
-		log.Fatalf("Status check failed: %v", err)
-	}
-}
-
-func handleTenantDrop() {
-	if len(os.Args) != 3 {
-		log.Fatalf("Usage: migrator tenant-drop <tenant_id>")
-	}
-	tenantID := os.Args[2]
-	
-	fmt.Printf("⚠️  WARNING: This will permanently delete tenant database: oilgas_%s\n", tenantID)
-	fmt.Print("Type 'yes' to confirm: ")
-	
-	var confirmation string
-	fmt.Scanln(&confirmation)
-	if confirmation != "yes" {
-		fmt.Println("Operation cancelled")
-		os.Exit(0)
-	}
-	
-	tm, err := NewTenantMigrator(tenantID)
-	if err != nil {
-		log.Fatalf("Failed to create tenant migrator: %v", err)
-	}
-	defer tm.Close()
-	
-	if err := tm.DropTenantDatabase(); err != nil {
-		log.Fatalf("Tenant drop failed: %v", err)
-	}
-}
-
-func handleTenantList() {
-	if err := listTenantDatabases(); err != nil {
-		log.Fatalf("Failed to list tenant databases: %v", err)
-	}
-}
-
-// ============================================================================
-// DATABASE CONNECTION AND UTILITIES
-// ============================================================================
-
-func connectDatabase(env string) (*sql.DB, error) {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		return nil, fmt.Errorf("DATABASE_URL environment variable not set")
-	}
-	
 	db, err := sql.Open("postgres", databaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-	
-	return db, nil
-}
-
-func validateTenantID(tenantID string) error {
-	if len(tenantID) < 2 || len(tenantID) > 20 {
-		return fmt.Errorf("tenant ID must be 2-20 characters")
-	}
-	
-	for _, char := range tenantID {
-		if !((char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '_') {
-			return fmt.Errorf("tenant ID must contain only lowercase letters, numbers, and underscores")
-		}
-	}
-	
-	return nil
-}
-
-// ============================================================================
-// SQL GENERATION FUNCTIONS (Function-based approach)
-// ============================================================================
-
-func generateMigrationFiles(env string) error {
-	if err := os.MkdirAll("migrations", 0755); err != nil {
-		return fmt.Errorf("failed to create migrations directory: %w", err)
-	}
-	
-	if err := generateStoreSchemaFile(env); err != nil {
-		return fmt.Errorf("failed to generate store schema: %w", err)
-	}
-	
-	if err := generateAuthSchemaFile(env); err != nil {
-		return fmt.Errorf("failed to generate auth schema: %w", err)
-	}
-	
-	if err := generateSeedDataFile(env); err != nil {
-		return fmt.Errorf("failed to generate seed data: %w", err)
-	}
-	
-	return nil
-}
-
-func generateStoreSchemaFile(env string) error {
-	filename := "migrations/001_store_schema.sql"
-	schema := getStoreSchemaSQL()
-	return writeSchemaFile(filename, schema, "Store Schema - Core business tables", env)
-}
-
-func generateAuthSchemaFile(env string) error {
-	filename := "migrations/002_auth_schema.sql"
-	schema := getAuthSchemaSQL()
-	return writeSchemaFile(filename, schema, "Auth Schema - Authentication and authorization", env)
-}
-
-func generateSeedDataFile(env string) error {
-	filename := "migrations/003_seed_data.sql"
-	seeds := getSeedDataSQL()
-	return writeSchemaFile(filename, seeds, "Seed Data - Reference data and defaults", env)
-}
-
-func writeSchemaFile(filename, content, description, env string) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return fmt.Errorf("failed to create file %s: %w", filename, err)
-	}
-	defer file.Close()
-	
-	header := fmt.Sprintf(`-- %s
--- Generated by cmd/migrator/main.go at %s
--- Environment: %s
--- Description: %s
--- ============================================================================
-
-`, filename, time.Now().Format("2006-01-02 15:04:05"), env, description)
-	
-	if _, err := file.WriteString(header + content); err != nil {
-		return fmt.Errorf("failed to write to file %s: %w", filename, err)
-	}
-	
-	return nil
-}
-
-func getStoreSchemaSQL() string {
-	return `-- Create schemas
-CREATE SCHEMA IF NOT EXISTS store;
-CREATE SCHEMA IF NOT EXISTS migrations;
-
--- Create migrations table
-CREATE TABLE IF NOT EXISTS migrations.schema_migrations (
-	version VARCHAR(255) PRIMARY KEY,
-	name VARCHAR(255) NOT NULL,
-	applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Create customers table
-CREATE TABLE IF NOT EXISTS store.customers (
-	customer_id SERIAL PRIMARY KEY,
-	customer VARCHAR(255) NOT NULL,
-	billing_address TEXT,
-	billing_city VARCHAR(100),
-	billing_state VARCHAR(50),
-	billing_zipcode VARCHAR(20),
-	contact VARCHAR(255),
-	phone VARCHAR(50),
-	fax VARCHAR(50),
-	email VARCHAR(255),
-	tenant_id VARCHAR(100),
-	imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-	deleted BOOLEAN DEFAULT FALSE,
-	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Create reference tables
-CREATE TABLE IF NOT EXISTS store.grade (
-	grade_id SERIAL PRIMARY KEY,
-	grade VARCHAR(50) NOT NULL UNIQUE,
-	description TEXT
-);
-
-CREATE TABLE IF NOT EXISTS store.sizes (
-	size_id SERIAL PRIMARY KEY,
-	size VARCHAR(50) NOT NULL UNIQUE,
-	diameter DECIMAL(6,3),
-	description TEXT
-);
-
--- Create inventory table
-CREATE TABLE IF NOT EXISTS store.inventory (
-	id SERIAL PRIMARY KEY,
-	work_order VARCHAR(100),
-	customer_id INTEGER REFERENCES store.customers(customer_id),
-	customer VARCHAR(255),
-	joints INTEGER DEFAULT 0,
-	size VARCHAR(50),
-	weight DECIMAL(10,2),
-	grade VARCHAR(50),
-	connection VARCHAR(100),
-	location VARCHAR(255),
-	notes TEXT,
-	tenant_id VARCHAR(100),
-	date_in DATE,
-	date_out DATE,
-	well_in VARCHAR(255),
-	well_out VARCHAR(255),
-	lease_in VARCHAR(255), 
-	lease_out VARCHAR(255),
-	imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-	deleted BOOLEAN DEFAULT FALSE,
-	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Create received table (work orders)
-CREATE TABLE IF NOT EXISTS store.received (
-	received_id SERIAL PRIMARY KEY,
-	customer_id INTEGER REFERENCES store.customers(customer_id),
-	r_number VARCHAR(100),
-	work_order VARCHAR(100),
-	size_id INTEGER REFERENCES store.sizes(size_id),
-	grade_id INTEGER REFERENCES store.grade(grade_id),
-	connection VARCHAR(100),
-	joints INTEGER DEFAULT 0,
-	date_received DATE,
-	ordered_by VARCHAR(255),
-	entered_by VARCHAR(255),
-	when_entered TIMESTAMP,
-	imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-	deleted BOOLEAN DEFAULT FALSE,
-	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Create indexes for performance
-CREATE INDEX IF NOT EXISTS idx_customers_email ON store.customers(email);
-CREATE INDEX IF NOT EXISTS idx_customers_deleted ON store.customers(deleted);
-CREATE INDEX IF NOT EXISTS idx_inventory_customer_id ON store.inventory(customer_id);
-CREATE INDEX IF NOT EXISTS idx_inventory_work_order ON store.inventory(work_order);
-CREATE INDEX IF NOT EXISTS idx_inventory_deleted ON store.inventory(deleted);
-CREATE INDEX IF NOT EXISTS idx_received_customer_id ON store.received(customer_id);
-CREATE INDEX IF NOT EXISTS idx_received_work_order ON store.received(work_order);
-CREATE INDEX IF NOT EXISTS idx_received_deleted ON store.received(deleted);
-
--- Record schema version
-INSERT INTO migrations.schema_migrations (version, name) 
-VALUES ('001', 'store_schema') 
-ON CONFLICT (version) DO NOTHING;`
-}
-
-func getAuthSchemaSQL() string {
-	return `-- Authentication and authorization schema
-CREATE SCHEMA IF NOT EXISTS auth;
-
--- Create tenants table
-CREATE TABLE IF NOT EXISTS auth.tenants (
-	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-	name VARCHAR(255) NOT NULL,
-	slug VARCHAR(100) NOT NULL UNIQUE,
-	database_type VARCHAR(50) DEFAULT 'tenant',
-	database_name VARCHAR(100),
-	active BOOLEAN DEFAULT true,
-	settings JSONB DEFAULT '{}',
-	created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-	updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Create users table
-CREATE TABLE IF NOT EXISTS auth.users (
-	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-	email VARCHAR(255) NOT NULL UNIQUE,
-	password_hash VARCHAR(255) NOT NULL,
-	role VARCHAR(50) NOT NULL DEFAULT 'user',
-	company VARCHAR(255) NOT NULL,
-	tenant_id VARCHAR(100) NOT NULL,
-	active BOOLEAN DEFAULT true,
-	email_verified BOOLEAN DEFAULT false,
-	last_login TIMESTAMP WITH TIME ZONE,
-	failed_login_attempts INTEGER DEFAULT 0,
-	locked_until TIMESTAMP WITH TIME ZONE,
-	password_changed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-	settings JSONB DEFAULT '{}',
-	created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-	updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-	
-	CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES auth.tenants(slug)
-);
-
--- Create sessions table
-CREATE TABLE IF NOT EXISTS auth.sessions (
-	id VARCHAR(255) PRIMARY KEY,
-	user_id UUID NOT NULL,
-	tenant_id VARCHAR(100) NOT NULL,
-	ip_address INET,
-	user_agent TEXT,
-	expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-	created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-	last_activity TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-	
-	CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,
-	CONSTRAINT fk_sessions_tenant FOREIGN KEY (tenant_id) REFERENCES auth.tenants(slug)
-);
-
--- Create indexes for performance
-CREATE INDEX IF NOT EXISTS idx_users_email ON auth.users(email);
-CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON auth.users(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_users_role ON auth.users(role);
-CREATE INDEX IF NOT EXISTS idx_users_active ON auth.users(active);
-CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON auth.sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_tenant_id ON auth.sessions(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON auth.sessions(expires_at);
-CREATE INDEX IF NOT EXISTS idx_tenants_slug ON auth.tenants(slug);
-CREATE INDEX IF NOT EXISTS idx_tenants_active ON auth.tenants(active);
-
--- Insert default system tenant
-INSERT INTO auth.tenants (name, slug, database_type, database_name) 
-VALUES ('System Administration', 'system', 'main', 'system')
-ON CONFLICT (slug) DO NOTHING;
-
--- Record schema version
-INSERT INTO migrations.schema_migrations (version, name) 
-VALUES ('002', 'auth_schema') 
-ON CONFLICT (version) DO NOTHING;`
-}
-
-func getSeedDataSQL() string {
-	return `-- Reference data and defaults
-
--- Insert standard oil & gas grades
-INSERT INTO store.grade (grade, description) VALUES
-('J55', 'Basic carbon steel casing and tubing'),
-('K55', 'Carbon steel with improved properties'),
-('N80', 'Quenched and tempered steel'),
-('L80', 'Chrome alloy steel'),
-('P110', 'High strength steel'),
-('C90', 'Chrome alloy steel'),
-('T95', 'High collapse resistance')
-ON CONFLICT (grade) DO NOTHING;
-
--- Insert standard pipe sizes  
-INSERT INTO store.sizes (size, diameter, description) VALUES
-('4 1/2"', 4.500, '4 1/2 inch casing'),
-('5"', 5.000, '5 inch casing'),
-('5 1/2"', 5.500, '5 1/2 inch casing'),
-('7"', 7.000, '7 inch casing'),
-('8 5/8"', 8.625, '8 5/8 inch casing'),
-('9 5/8"', 9.625, '9 5/8 inch casing'),
-('10 3/4"', 10.750, '10 3/4 inch casing'),
-('13 3/8"', 13.375, '13 3/8 inch casing'),
-('2 3/8"', 2.375, '2 3/8 inch tubing'),
-('2 7/8"', 2.875, '2 7/8 inch tubing'),
-('3 1/2"', 3.500, '3 1/2 inch tubing')
-ON CONFLICT (size) DO NOTHING;
-
--- Record seed version
-INSERT INTO migrations.schema_migrations (version, name) 
-VALUES ('003', 'seed_data') 
-ON CONFLICT (version) DO NOTHING;`
-}
-
-// ============================================================================
-// MIGRATION EXECUTION FUNCTIONS
-// ============================================================================
-
-func runMigrations(db *sql.DB) error {
-	migrationFiles := []string{
-		"migrations/001_store_schema.sql",
-		"migrations/002_auth_schema.sql", 
-		"migrations/003_seed_data.sql",
-	}
-	
-	for _, file := range migrationFiles {
-		if err := executeMigrationFile(db, file); err != nil {
-			return fmt.Errorf("failed to execute %s: %w", file, err)
-		}
-	}
-	
-	return nil
-}
-
-func executeMigrationFile(db *sql.DB, filename string) error {
-	log.Printf("📦 Executing: %s", filename)
-	
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return fmt.Errorf("failed to read file %s: %w", filename, err)
-	}
-	
-	if _, err := db.Exec(string(content)); err != nil {
-		return fmt.Errorf("failed to execute SQL from %s: %w", filename, err)
-	}
-	
-	log.Printf("✅ Completed: %s", filename)
-	return nil
-}
-
-func runSeeds(db *sql.DB) error {
-	seedFile := "migrations/003_seed_data.sql"
-	return executeMigrationFile(db, seedFile)
-}
-
-func showStatus(db *sql.DB) error {
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM migrations.schema_migrations").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to query migrations: %w", err)
-	}
-	
-	fmt.Printf("Applied migrations: %d\n", count)
-	
-	rows, err := db.Query("SELECT version, name, applied_at FROM migrations.schema_migrations ORDER BY version")
-	if err != nil {
-		return fmt.Errorf("failed to query migration details: %w", err)
-	}
-	defer rows.Close()
-	
-	fmt.Println("\nMigration History:")
-	for rows.Next() {
-		var version, name, appliedAt string
-		if err := rows.Scan(&version, &name, &appliedAt); err != nil {
-			continue
-		}
-		fmt.Printf("  %s - %s (%s)\n", version, name, appliedAt)
-	}
-	
-	return nil
-}
-
-func resetDatabase(db *sql.DB) error {
-	commands := []string{
-		"DROP SCHEMA IF EXISTS store CASCADE",
-		"DROP SCHEMA IF EXISTS auth CASCADE", 
-		"DROP SCHEMA IF EXISTS migrations CASCADE",
-	}
-	
-	for _, cmd := range commands {
-		if _, err := db.Exec(cmd); err != nil {
-			return fmt.Errorf("failed to execute %s: %w", cmd, err)
-		}
-	}
-	
-	return nil
-}
-
-// ============================================================================
-// TENANT MIGRATOR IMPLEMENTATION
-// ============================================================================
-
-func NewTenantMigrator(tenantID string) (*TenantMigrator, error) {
-	// Connect to base database
-	baseDB, err := connectDatabase("local")
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to base database: %w", err)
-	}
-	
-	return &TenantMigrator{
-		baseDB:   baseDB,
-		tenantID: tenantID,
-	}, nil
-}
-
-func (tm *TenantMigrator) Close() {
-	if tm.baseDB != nil {
-		tm.baseDB.Close()
-	}
-	if tm.tenantDB != nil {
-		tm.tenantDB.Close()
-	}
-}
-
-func (tm *TenantMigrator) CreateTenantDatabase() error {
-	dbName := fmt.Sprintf("oilgas_%s", tm.tenantID)
-	
-	// Create database
-	createQuery := fmt.Sprintf("CREATE DATABASE %s", dbName)
-	if _, err := tm.baseDB.Exec(createQuery); err != nil {
-		if !strings.Contains(err.Error(), "already exists") {
-			return fmt.Errorf("failed to create database %s: %w", dbName, err)
-		}
-		log.Printf("Database %s already exists", dbName)
-	}
-	
-	// Connect to tenant database and run migrations
-	if err := tm.connectToTenantDB(dbName); err != nil {
-		return fmt.Errorf("failed to connect to tenant database: %w", err)
-	}
-	
-	if err := runMigrations(tm.tenantDB); err != nil {
-		return fmt.Errorf("failed to run tenant migrations: %w", err)
-	}
-	
-	log.Printf("✅ Tenant database ready: %s", dbName)
-	return nil
-}
-
-func (tm *TenantMigrator) connectToTenantDB(dbName string) error {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		return fmt.Errorf("DATABASE_URL environment variable not set")
-	}
-	
-	// Replace database name in connection string
-	parts := strings.Split(databaseURL, "/")
-	if len(parts) < 4 {
-		return fmt.Errorf("invalid DATABASE_URL format")
-	}
-	
-	// Handle potential query parameters
-	lastPart := parts[len(parts)-1]
-	var params string
-	if strings.Contains(lastPart, "?") {
-		dbAndParams := strings.Split(lastPart, "?")
-		params = "?" + dbAndParams[1]
-	}
-	
-	parts[len(parts)-1] = dbName + params
-	tenantURL := strings.Join(parts, "/")
-	
-	db, err := sql.Open("postgres", tenantURL)
-	if err != nil {
-		return fmt.Errorf("failed to open tenant database: %w", err)
-	}
-	
-	if err := db.Ping(); err != nil {
-		return fmt.Errorf("failed to ping tenant database: %w", err)
-	}
-	
-	tm.tenantDB = db
-	return nil
-}
-
-func (tm *TenantMigrator) ImportCSVData(csvDir string) error {
-	log.Printf("🔄 Importing CSV data from: %s", csvDir)
-	// Implementation would go here - CSV import logic
-	// This is a placeholder for the CSV import functionality
-	log.Printf("✅ CSV import completed (placeholder)")
-	return nil
-}
-
-func (tm *TenantMigrator) ShowTenantStatus() error {
-	dbName := fmt.Sprintf("oilgas_%s", tm.tenantID)
-	log.Printf("📊 Tenant Status: %s", dbName)
-	
-	if err := tm.connectToTenantDB(dbName); err != nil {
-		return fmt.Errorf("failed to connect to tenant database: %w", err)
-	}
-	
-	return showStatus(tm.tenantDB)
-}
-
-func (tm *TenantMigrator) DropTenantDatabase() error {
-	dbName := fmt.Sprintf("oilgas_%s", tm.tenantID)
-	
-	// Close any existing connections
-	if tm.tenantDB != nil {
-		tm.tenantDB.Close()
-		tm.tenantDB = nil
-	}
-	
-	// Drop database
-	dropQuery := fmt.Sprintf("DROP DATABASE IF EXISTS %s", dbName)
-	if _, err := tm.baseDB.Exec(dropQuery); err != nil {
-		return fmt.Errorf("failed to drop database %s: %w", dbName, err)
-	}
-	
-	log.Printf("✅ Tenant database dropped: %s", dbName)
-	return nil
-}
-
-func listTenantDatabases() error {
-	db, err := connectDatabase("local")
-	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return fmt.Errorf("failed to connect to %s database: %w", environment, err)
 	}
 	defer db.Close()
-	
-	query := `
-		SELECT datname 
-		FROM pg_database 
-		WHERE datname LIKE 'oilgas_%' 
-		ORDER BY datname
-	`
-	
-	rows, err := db.Query(query)
-	if err != nil {
-		return fmt.Errorf("failed to query tenant databases: %w", err)
+
+	// Test connection
+	if err := db.Ping(); err != nil {
+		return fmt.Errorf("failed to ping %s database: %w", environment, err)
 	}
-	defer rows.Close()
+
+	stats := &MigrationStats{StartTime: time.Now()}
+
+	// Set tenant context
+	if err := setTenantContext(db, config.TenantID); err != nil {
+		return fmt.Errorf("failed to set tenant context: %w", err)
+	}
+
+	// Migrate customers data
+	if err := migrateCustomers(db, config, stats); err != nil {
+		return fmt.Errorf("customer migration failed: %w", err)
+	}
+
+	stats.EndTime = time.Now()
+	duration := stats.EndTime.Sub(stats.StartTime)
+
+	log.Printf("%s Migration Summary:", strings.Title(environment))
+	log.Printf("  Tables processed: %d", stats.TablesProcessed)
+	log.Printf("  Records inserted: %d", stats.RecordsInserted)
+	log.Printf("  Records skipped: %d", stats.RecordsSkipped)
+	log.Printf("  Errors: %d", stats.ErrorCount)
+	log.Printf("  Duration: %v", duration)
+
+	// Write detailed log
+	logFile := filepath.Join(config.LogPath, fmt.Sprintf("migration_%s_%s.log", environment, time.Now().Format("20060102_150405")))
+	writeLogFile(logFile, environment, stats, config)
+
+	return nil
+}
+
+func migrateCustomers(db *sql.DB, config MigrationConfig, stats *MigrationStats) error {
+	log.Printf("Migrating customers data...")
+
+	// Look for customer CSV files from Phase 1
+	customerFiles := []string{
+		filepath.Join(config.DataPath, "customers.csv"),
+		filepath.Join(config.DataPath, "customer.csv"),
+		filepath.Join(config.DataPath, "cust.csv"),
+	}
+
+	var customerFile string
+	for _, file := range customerFiles {
+		if _, err := os.Stat(file); err == nil {
+			customerFile = file
+			break
+		}
+	}
+
+	if customerFile == "" {
+		log.Printf("No customer CSV file found in %s, skipping customer migration", config.DataPath)
+		return nil
+	}
+
+	log.Printf("Found customer data file: %s", customerFile)
+
+	file, err := os.Open(customerFile)
+	if err != nil {
+		return fmt.Errorf("failed to open customer file: %w", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return fmt.Errorf("failed to read CSV: %w", err)
+	}
+
+	if len(records) == 0 {
+		log.Printf("Customer file is empty, skipping")
+		return nil
+	}
+
+	// Get headers and map columns
+	headers := records[0]
+	columnMap := mapCustomerColumns(headers)
 	
-	fmt.Println("📋 Tenant Databases:")
-	count := 0
-	for rows.Next() {
-		var dbName string
-		if err := rows.Scan(&dbName); err != nil {
+	log.Printf("Found %d customer records to process", len(records)-1)
+	log.Printf("Column mapping: %+v", columnMap)
+
+	// Process in batches
+	recordCount := 0
+	for i := 1; i < len(records); i += config.BatchSize {
+		end := i + config.BatchSize
+		if end > len(records) {
+			end = len(records)
+		}
+
+		batch := records[i:end]
+		inserted, skipped, err := insertCustomerBatch(db, batch, columnMap, config)
+		if err != nil {
+			log.Printf("Batch %d-%d failed: %v", i, end-1, err)
+			stats.ErrorCount++
 			continue
 		}
-		
-		// Extract tenant ID from database name
-		tenantID := strings.TrimPrefix(dbName, "oilgas_")
-		fmt.Printf("  • %s (tenant: %s)\n", dbName, tenantID)
-		count++
+
+		recordCount += inserted
+		stats.RecordsInserted += inserted
+		stats.RecordsSkipped += skipped
+
+		log.Printf("Processed batch %d-%d: %d inserted, %d skipped", i, end-1, inserted, skipped)
 	}
-	
-	if count == 0 {
-		fmt.Println("  No tenant databases found")
-	} else {
-		fmt.Printf("\nTotal tenant databases: %d\n", count)
-	}
-	
+
+	stats.TablesProcessed++
+	log.Printf("Customer migration completed: %d records processed", recordCount)
 	return nil
+}
+
+func mapCustomerColumns(headers []string) map[string]int {
+	// Map Access column names to positions
+	columnMap := make(map[string]int)
+	
+	// Mapping based on common Access field names from Phase 1 analysis
+	fieldMappings := map[string][]string{
+		"customer_id":      {"custid", "customerid", "customer_id", "id"},
+		"customer":         {"custname", "customername", "customer", "name", "company"},
+		"billing_address":  {"billaddr", "billing_address", "address", "addr"},
+		"billing_city":     {"billcity", "billing_city", "city"},
+		"billing_state":    {"billstate", "billing_state", "state", "st"},
+		"billing_zipcode":  {"billzip", "billing_zipcode", "zipcode", "zip"},
+		"contact":          {"contact", "contactname", "contact_name"},
+		"phone":            {"phoneno", "phone", "phonenum", "telephone"},
+		"fax":              {"fax", "faxno", "faxnum"},
+		"email":            {"email", "emailaddr", "email_address"},
+	}
+
+	for i, header := range headers {
+		normalizedHeader := strings.ToLower(strings.TrimSpace(header))
+		
+		// Direct mapping
+		for field, variations := range fieldMappings {
+			for _, variation := range variations {
+				if normalizedHeader == variation {
+					columnMap[field] = i
+					break
+				}
+			}
+		}
+	}
+
+	return columnMap
+}
+
+func insertCustomerBatch(db *sql.DB, batch [][]string, columnMap map[string]int, config MigrationConfig) (int, int, error) {
+	if config.DryRun {
+		log.Printf("DRY RUN: Would insert %d customer records", len(batch))
+		return len(batch), 0, nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO store.customers (
+			customer, billing_address, billing_city, billing_state, billing_zipcode,
+			contact, phone, fax, email, tenant_id, imported_at, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		ON CONFLICT DO NOTHING`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	inserted := 0
+	skipped := 0
+	now := time.Now()
+
+	for _, record := range batch {
+		customer := extractCustomerData(record, columnMap)
+		
+		// Skip if required fields are missing
+		if customer.Customer == "" {
+			skipped++
+			continue
+		}
+
+		// Validate state code
+		if customer.BillingState != "" && len(customer.BillingState) != 2 {
+			customer.BillingState = "" // Clear invalid state
+		}
+
+		// Execute insert
+		result, err := stmt.Exec(
+			customer.Customer,
+			nullString(customer.BillingAddress),
+			nullString(customer.BillingCity),
+			nullString(customer.BillingState),
+			nullString(customer.BillingZipcode),
+			nullString(customer.Contact),
+			nullString(customer.Phone),
+			nullString(customer.Fax),
+			nullString(customer.Email),
+			config.TenantID,
+			now,
+			now,
+		)
+
+		if err != nil {
+			if pqErr, ok := err.(*pq.Error); ok {
+				// Handle specific PostgreSQL errors
+				switch pqErr.Code {
+				case "23505": // unique_violation
+					skipped++
+					continue
+				case "23514": // check_violation
+					log.Printf("Data validation error for customer %s: %v", customer.Customer, err)
+					skipped++
+					continue
+				}
+			}
+			return inserted, skipped, fmt.Errorf("failed to insert customer %s: %w", customer.Customer, err)
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected > 0 {
+			inserted++
+		} else {
+			skipped++
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return inserted, skipped, nil
+}
+
+type CustomerRecord struct {
+	CustomerID      string
+	Customer        string
+	BillingAddress  string
+	BillingCity     string
+	BillingState    string
+	BillingZipcode  string
+	Contact         string
+	Phone           string
+	Fax             string
+	Email           string
+}
+
+func extractCustomerData(record []string, columnMap map[string]int) CustomerRecord {
+	customer := CustomerRecord{}
+
+	if idx, ok := columnMap["customer_id"]; ok && idx < len(record) {
+		customer.CustomerID = strings.TrimSpace(record[idx])
+	}
+	if idx, ok := columnMap["customer"]; ok && idx < len(record) {
+		customer.Customer = strings.TrimSpace(record[idx])
+	}
+	if idx, ok := columnMap["billing_address"]; ok && idx < len(record) {
+		customer.BillingAddress = strings.TrimSpace(record[idx])
+	}
+	if idx, ok := columnMap["billing_city"]; ok && idx < len(record) {
+		customer.BillingCity = strings.TrimSpace(record[idx])
+	}
+	if idx, ok := columnMap["billing_state"]; ok && idx < len(record) {
+		state := strings.TrimSpace(strings.ToUpper(record[idx]))
+		if len(state) <= 2 {
+			customer.BillingState = state
+		}
+	}
+	if idx, ok := columnMap["billing_zipcode"]; ok && idx < len(record) {
+		customer.BillingZipcode = strings.TrimSpace(record[idx])
+	}
+	if idx, ok := columnMap["contact"]; ok && idx < len(record) {
+		customer.Contact = strings.TrimSpace(record[idx])
+	}
+	if idx, ok := columnMap["phone"]; ok && idx < len(record) {
+		customer.Phone = cleanPhoneNumber(strings.TrimSpace(record[idx]))
+	}
+	if idx, ok := columnMap["fax"]; ok && idx < len(record) {
+		customer.Fax = cleanPhoneNumber(strings.TrimSpace(record[idx]))
+	}
+	if idx, ok := columnMap["email"]; ok && idx < len(record) {
+		email := strings.TrimSpace(strings.ToLower(record[idx]))
+		if isValidEmail(email) {
+			customer.Email = email
+		}
+	}
+
+	return customer
+}
+
+func setTenantContext(db *sql.DB, tenantID string) error {
+	_, err := db.Exec("SELECT set_tenant_context($1)", tenantID)
+	return err
+}
+
+func cleanPhoneNumber(phone string) string {
+	if phone == "" {
+		return ""
+	}
+	// Basic phone cleaning - remove extra characters but keep structure
+	phone = strings.ReplaceAll(phone, "(", "")
+	phone = strings.ReplaceAll(phone, ")", "")
+	return strings.TrimSpace(phone)
+}
+
+func isValidEmail(email string) bool {
+	if email == "" {
+		return false
+	}
+	// Basic email validation
+	return strings.Contains(email, "@") && strings.Contains(email, ".") && len(email) > 5
+}
+
+func nullString(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func writeLogFile(filename, environment string, stats *MigrationStats, config MigrationConfig) {
+	content := fmt.Sprintf(`Migration Log - %s Environment
+========================================
+Start Time: %s
+End Time: %s
+Duration: %v
+
+Configuration:
+- Tenant ID: %s
+- Data Path: %s
+- Batch Size: %d
+- Dry Run: %t
+
+Results:
+- Tables Processed: %d
+- Records Inserted: %d
+- Records Skipped: %d
+- Errors: %d
+
+Status: %s
+`,
+		strings.Title(environment),
+		stats.StartTime.Format(time.RFC3339),
+		stats.EndTime.Format(time.RFC3339),
+		stats.EndTime.Sub(stats.StartTime),
+		config.TenantID,
+		config.DataPath,
+		config.BatchSize,
+		config.DryRun,
+		stats.TablesProcessed,
+		stats.RecordsInserted,
+		stats.RecordsSkipped,
+		stats.ErrorCount,
+		func() string {
+			if stats.ErrorCount == 0 {
+				return "SUCCESS"
+			}
+			return "COMPLETED WITH ERRORS"
+		}(),
+	)
+
+	if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
+		log.Printf("Failed to write log file %s: %v", filename, err)
+	} else {
+		log.Printf("Migration log written to: %s", filename)
+	}
+}
+
+// Helper functions for environment variables
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if i, err := strconv.Atoi(value); err == nil {
+			return i
+		}
+	}
+	return defaultValue
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if b, err := strconv.ParseBool(value); err == nil {
+			return b
+		}
+	}
+	return defaultValue
 }
