@@ -1,551 +1,391 @@
 // backend/internal/customer/service.go
+// Customer domain service aligned with existing Customer struct
 package customer
 
 import (
-	"context"
+	"database/sql"
 	"fmt"
-	"regexp"
 	"strings"
-	"time"
+
+	"github.com/jmoiron/sqlx"
 )
 
+// Service handles customer business logic with tenant isolation
 type Service struct {
-	repo *Repository
+	db *sqlx.DB
 }
 
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+// NewService creates a new customer service instance
+func NewService(db *sqlx.DB) *Service {
+	return &Service{db: db}
 }
 
-// GetCustomersForTenant retrieves customers with filtering and analytics
-func (s *Service) GetCustomersForTenant(ctx context.Context, tenantID string, filters CustomerFilters) (*CustomerSearchResponse, error) {
-	if err := s.validateTenantID(tenantID); err != nil {
+// CustomerFilter represents filtering options for customer queries
+type CustomerFilter struct {
+	TenantID       string
+	State          string
+	Search         string
+	IncludeDeleted bool
+	Limit          int
+	Offset         int
+}
+
+// SetTenantContext sets the database tenant context for row-level security
+func (s *Service) SetTenantContext(tenantID string) error {
+	query := `SELECT set_tenant_context($1)`
+	_, err := s.db.Exec(query, tenantID)
+	if err != nil {
+		return fmt.Errorf("failed to set tenant context: %w", err)
+	}
+	return nil
+}
+
+// GetCurrentTenant returns the current tenant context
+func (s *Service) GetCurrentTenant() (string, error) {
+	var tenantID string
+	query := `SELECT get_current_tenant()`
+	err := s.db.Get(&tenantID, query)
+	if err != nil {
+		return "", fmt.Errorf("failed to get current tenant: %w", err)
+	}
+	return tenantID, nil
+}
+
+// GetCustomersByTenant retrieves customers for a specific tenant
+func (s *Service) GetCustomersByTenant(tenantID string) ([]Customer, error) {
+	if err := s.SetTenantContext(tenantID); err != nil {
 		return nil, err
 	}
 
-	// Set default pagination
-	if filters.Limit <= 0 {
-		filters.Limit = 20
-	}
-	if filters.Limit > 100 {
-		filters.Limit = 100
-	}
+	query := `
+		SELECT 
+			customer_id, customer, billing_address, billing_city, billing_state, 
+			billing_zipcode, contact, phone, fax, email, tenant_id,
+			deleted, created_at, updated_at
+		FROM store.customers_standardized 
+		WHERE deleted = false
+		ORDER BY customer`
 
-	customers, err := s.repo.GetAllForTenant(ctx, tenantID, filters)
+	var customers []Customer
+	err := s.db.Select(&customers, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get customers: %w", err)
-	}
-
-	total, err := s.repo.GetCountForTenant(ctx, tenantID, filters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get customer count: %w", err)
-	}
-
-	page := 1
-	if filters.Offset > 0 && filters.Limit > 0 {
-		page = (filters.Offset / filters.Limit) + 1
-	}
-
-	hasMore := filters.Offset+len(customers) < total
-
-	return &CustomerSearchResponse{
-		Customers: customers,
-		Total:     total,
-		Page:      page,
-		PageSize:  len(customers),
-		HasMore:   hasMore,
-	}, nil
-}
-
-// GetCustomerByIDForTenant retrieves a single customer with analytics
-func (s *Service) GetCustomerByIDForTenant(ctx context.Context, tenantID string, id int) (*Customer, error) {
-	if err := s.validateTenantID(tenantID); err != nil {
-		return nil, err
-	}
-
-	if id <= 0 {
-		return nil, ErrInvalidCustomerID
-	}
-
-	customer, err := s.repo.GetByIDForTenant(ctx, tenantID, id)
-	if err != nil {
-		return nil, err
-	}
-
-	return customer, nil
-}
-
-// SearchCustomersForTenant provides enhanced search with ranking
-func (s *Service) SearchCustomersForTenant(ctx context.Context, tenantID, query string) ([]Customer, error) {
-	if err := s.validateTenantID(tenantID); err != nil {
-		return nil, err
-	}
-
-	query = strings.TrimSpace(query)
-	if len(query) > 100 {
-		return nil, fmt.Errorf("search query too long (max 100 characters)")
-	}
-
-	customers, err := s.repo.SearchForTenant(ctx, tenantID, query)
-	if err != nil {
-		return nil, fmt.Errorf("search failed: %w", err)
+		return nil, fmt.Errorf("failed to get customers for tenant %s: %w", tenantID, err)
 	}
 
 	return customers, nil
 }
 
-// GetCustomerAnalyticsForTenant provides detailed analytics
-func (s *Service) GetCustomerAnalyticsForTenant(ctx context.Context, tenantID string, customerID int) (*CustomerAnalytics, error) {
-	if err := s.validateTenantID(tenantID); err != nil {
+// GetCustomerByID retrieves a specific customer by ID within tenant context
+func (s *Service) GetCustomerByID(tenantID string, customerID int) (*Customer, error) {
+	if err := s.SetTenantContext(tenantID); err != nil {
 		return nil, err
 	}
 
-	if customerID <= 0 {
-		return nil, ErrInvalidCustomerID
-	}
+	query := `
+		SELECT 
+			customer_id, customer, billing_address, billing_city, billing_state, 
+			billing_zipcode, contact, phone, fax, email, tenant_id,
+			deleted, created_at, updated_at
+		FROM store.customers_standardized 
+		WHERE customer_id = $1 AND deleted = false`
 
-	// Verify customer exists and belongs to tenant
-	_, err := s.repo.GetByIDForTenant(ctx, tenantID, customerID)
+	var customer Customer
+	err := s.db.Get(&customer, query, customerID)
 	if err != nil {
-		return nil, err
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("customer %d not found for tenant %s", customerID, tenantID)
+		}
+		return nil, fmt.Errorf("failed to get customer %d: %w", customerID, err)
 	}
 
-	analytics, err := s.repo.GetAnalyticsForTenant(ctx, tenantID, customerID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get analytics: %w", err)
-	}
-
-	return analytics, nil
+	return &customer, nil
 }
 
-// CreateCustomerForTenant creates a new customer with validation
-func (s *Service) CreateCustomerForTenant(ctx context.Context, tenantID string, req CreateCustomerRequest) (*Customer, error) {
-	if err := s.validateTenantID(tenantID); err != nil {
+// SearchCustomers performs filtered search with pagination
+func (s *Service) SearchCustomers(filter CustomerFilter) ([]Customer, error) {
+	if err := s.SetTenantContext(filter.TenantID); err != nil {
 		return nil, err
 	}
 
-	customer := &Customer{
-		Customer:                req.Customer,
-		BillingAddress:          req.BillingAddress,
-		BillingCity:             req.BillingCity,
-		BillingState:            req.BillingState,
-		BillingZipcode:          req.BillingZipcode,
-		Contact:                 req.Contact,
-		Phone:                   req.Phone,
-		Fax:                     req.Fax,
-		Email:                   req.Email,
-		PreferredPaymentTerms:   req.PreferredPaymentTerms,
-		PreferredShippingMethod: req.PreferredShippingMethod,
-		DefaultPORequired:       req.DefaultPORequired,
-		CreditLimit:             req.CreditLimit,
-		TenantID:                tenantID,
+	var conditions []string
+	var args []interface{}
+	argIndex := 1
+
+	baseQuery := `
+		SELECT 
+			customer_id, customer, billing_address, billing_city, billing_state, 
+			billing_zipcode, contact, phone, fax, email, tenant_id,
+			deleted, created_at, updated_at
+		FROM store.customers_standardized WHERE 1=1`
+
+	// Add filters
+	if !filter.IncludeDeleted {
+		conditions = append(conditions, "deleted = false")
 	}
 
-	if err := s.validateCustomer(customer); err != nil {
-		return nil, err
+	if filter.State != "" {
+		conditions = append(conditions, fmt.Sprintf("billing_state = $%d", argIndex))
+		args = append(args, filter.State)
+		argIndex++
 	}
 
-	if err := s.repo.CreateForTenant(ctx, tenantID, customer); err != nil {
-		return nil, fmt.Errorf("failed to create customer: %w", err)
+	if filter.Search != "" {
+		searchPattern := "%" + strings.ToLower(filter.Search) + "%"
+		conditions = append(conditions, fmt.Sprintf("(LOWER(customer) LIKE $%d OR LOWER(contact) LIKE $%d)", argIndex, argIndex))
+		args = append(args, searchPattern)
+		argIndex++
 	}
 
-	return customer, nil
-}
+	// Build final query
+	query := baseQuery
+	if len(conditions) > 0 {
+		query += " AND " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY customer"
 
-// UpdateCustomerForTenant updates an existing customer
-func (s *Service) UpdateCustomerForTenant(ctx context.Context, tenantID string, id int, req UpdateCustomerRequest) (*Customer, error) {
-	if err := s.validateTenantID(tenantID); err != nil {
-		return nil, err
-	}
+	// Add pagination
+	if filter.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", argIndex)
+		args = append(args, filter.Limit)
+		argIndex++
 
-	if id <= 0 {
-		return nil, ErrInvalidCustomerID
-	}
-
-	// Get existing customer
-	customer, err := s.repo.GetByIDForTenant(ctx, tenantID, id)
-	if err != nil {
-		return nil, err
-	}
-
-	// Apply updates
-	if req.Customer != nil {
-		customer.Customer = *req.Customer
-	}
-	if req.BillingAddress != nil {
-		customer.BillingAddress = req.BillingAddress
-	}
-	if req.BillingCity != nil {
-		customer.BillingCity = req.BillingCity
-	}
-	if req.BillingState != nil {
-		customer.BillingState = req.BillingState
-	}
-	if req.BillingZipcode != nil {
-		customer.BillingZipcode = req.BillingZipcode
-	}
-	if req.Contact != nil {
-		customer.Contact = req.Contact
-	}
-	if req.Phone != nil {
-		customer.Phone = req.Phone
-	}
-	if req.Fax != nil {
-		customer.Fax = req.Fax
-	}
-	if req.Email != nil {
-		customer.Email = req.Email
-	}
-	if req.PreferredPaymentTerms != nil {
-		customer.PreferredPaymentTerms = req.PreferredPaymentTerms
-	}
-	if req.PreferredShippingMethod != nil {
-		customer.PreferredShippingMethod = req.PreferredShippingMethod
-	}
-	if req.DefaultPORequired != nil {
-		customer.DefaultPORequired = *req.DefaultPORequired
-	}
-	if req.CreditLimit != nil {
-		customer.CreditLimit = req.CreditLimit
-	}
-
-	if err := s.validateCustomer(customer); err != nil {
-		return nil, err
-	}
-
-	if err := s.repo.UpdateForTenant(ctx, tenantID, customer); err != nil {
-		return nil, fmt.Errorf("failed to update customer: %w", err)
-	}
-
-	return customer, nil
-}
-
-// UpdateCustomerContactsForTenant updates contact information
-func (s *Service) UpdateCustomerContactsForTenant(ctx context.Context, tenantID string, customerID int, req UpdateContactsRequest) error {
-	if err := s.validateTenantID(tenantID); err != nil {
-		return err
-	}
-
-	if customerID <= 0 {
-		return ErrInvalidCustomerID
-	}
-
-	// Verify customer exists
-	_, err := s.repo.GetByIDForTenant(ctx, tenantID, customerID)
-	if err != nil {
-		return err
-	}
-
-	// Validate contacts
-	if req.PrimaryContact != nil {
-		if err := s.validateContact(req.PrimaryContact); err != nil {
-			return fmt.Errorf("invalid primary contact: %w", err)
+		if filter.Offset > 0 {
+			query += fmt.Sprintf(" OFFSET $%d", argIndex)
+			args = append(args, filter.Offset)
 		}
 	}
 
-	if req.BillingContact != nil {
-		if err := s.validateContact(req.BillingContact); err != nil {
-			return fmt.Errorf("invalid billing contact: %w", err)
-		}
+	var customers []Customer
+	err := s.db.Select(&customers, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search customers: %w", err)
 	}
 
-	// TODO: Store contacts in separate table or JSON column
-	// For now, this would require database schema updates
-	return fmt.Errorf("contact updates not yet implemented - requires schema enhancement")
+	return customers, nil
 }
 
-// DeleteCustomerForTenant soft deletes a customer
-func (s *Service) DeleteCustomerForTenant(ctx context.Context, tenantID string, id int) error {
-	if err := s.validateTenantID(tenantID); err != nil {
+// CreateCustomer creates a new customer with validation
+func (s *Service) CreateCustomer(customer *Customer) error {
+	if err := s.ValidateCustomer(customer); err != nil {
 		return err
 	}
 
-	if id <= 0 {
-		return ErrInvalidCustomerID
+	if err := s.SetTenantContext(customer.TenantID); err != nil {
+		return err
 	}
 
-	// TODO: Check for active work orders before allowing deletion
-	// For now, proceed with soft delete
-	if err := s.repo.DeleteForTenant(ctx, tenantID, id); err != nil {
+	query := `
+		INSERT INTO store.customers_standardized (
+			customer, billing_address, billing_city, billing_state, billing_zipcode,
+			contact, phone, fax, email, tenant_id
+		) VALUES (
+			:customer, :billing_address, :billing_city, :billing_state, :billing_zipcode,
+			:contact, :phone, :fax, :email, :tenant_id
+		) RETURNING customer_id`
+
+	rows, err := s.db.NamedQuery(query, customer)
+	if err != nil {
+		return fmt.Errorf("failed to create customer: %w", err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		err = rows.Scan(&customer.CustomerID)
+		if err != nil {
+			return fmt.Errorf("failed to get new customer ID: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// UpdateCustomer updates an existing customer
+func (s *Service) UpdateCustomer(customer *Customer) error {
+	if err := s.ValidateCustomer(customer); err != nil {
+		return err
+	}
+
+	if err := s.SetTenantContext(customer.TenantID); err != nil {
+		return err
+	}
+
+	query := `
+		UPDATE store.customers_standardized SET
+			customer = :customer,
+			billing_address = :billing_address,
+			billing_city = :billing_city,
+			billing_state = :billing_state,
+			billing_zipcode = :billing_zipcode,
+			contact = :contact,
+			phone = :phone,
+			fax = :fax,
+			email = :email
+		WHERE customer_id = :customer_id AND tenant_id = :tenant_id`
+
+	result, err := s.db.NamedExec(query, customer)
+	if err != nil {
+		return fmt.Errorf("failed to update customer: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("customer %d not found for tenant %s", customer.CustomerID, customer.TenantID)
+	}
+
+	return nil
+}
+
+// SoftDeleteCustomer marks a customer as deleted (soft delete)
+func (s *Service) SoftDeleteCustomer(tenantID string, customerID int) error {
+	if err := s.SetTenantContext(tenantID); err != nil {
+		return err
+	}
+
+	query := `UPDATE store.customers_standardized SET deleted = true WHERE customer_id = $1`
+	result, err := s.db.Exec(query, customerID)
+	if err != nil {
 		return fmt.Errorf("failed to delete customer: %w", err)
 	}
 
-	return nil
-}
-
-// Enterprise methods for cross-tenant operations (admin only)
-func (s *Service) GetCustomersByIDs(ctx context.Context, customerIDs []int) ([]Customer, error) {
-	if len(customerIDs) == 0 {
-		return []Customer{}, nil
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 
-	if len(customerIDs) > 100 {
-		return nil, fmt.Errorf("too many customer IDs (max 100)")
-	}
-
-	return s.repo.GetCustomersByIDs(ctx, customerIDs)
-}
-
-func (s *Service) GetCustomerSummaryByTenant(ctx context.Context) (map[string]int, error) {
-	return s.repo.GetCustomerSummaryByTenant(ctx)
-}
-
-// Validation methods
-func (s *Service) validateTenantID(tenantID string) error {
-	if tenantID == "" {
-		return fmt.Errorf("tenant ID is required")
-	}
-	if len(tenantID) > 50 {
-		return fmt.Errorf("tenant ID too long")
-	}
-	return nil
-}
-
-func (s *Service) validateCustomer(customer *Customer) error {
-	if err := customer.Validate(); err != nil {
-		return err
-	}
-
-	// Additional business logic validation
-	if customer.BillingState != nil && *customer.BillingState != "" {
-		if !s.isValidStateCode(*customer.BillingState) {
-			return fmt.Errorf("invalid state code: %s", *customer.BillingState)
-		}
-	}
-
-	if customer.Email != nil && *customer.Email != "" {
-		if !s.isValidEmail(*customer.Email) {
-			return fmt.Errorf("invalid email format")
-		}
-	}
-
-	if customer.Phone != nil && *customer.Phone != "" {
-		if !s.isValidPhone(*customer.Phone) {
-			return fmt.Errorf("invalid phone format")
-		}
-	}
-
-	if customer.CreditLimit != nil && *customer.CreditLimit < 0 {
-		return fmt.Errorf("credit limit cannot be negative")
+	if rowsAffected == 0 {
+		return fmt.Errorf("customer %d not found for tenant %s", customerID, tenantID)
 	}
 
 	return nil
 }
 
-func (s *Service) validateContact(contact *Contact) error {
-	if contact.Name == "" {
-		return fmt.Errorf("contact name is required")
-	}
-	if len(contact.Name) > 255 {
-		return fmt.Errorf("contact name too long")
-	}
-	if contact.Email != nil && *contact.Email != "" {
-		if !s.isValidEmail(*contact.Email) {
-			return fmt.Errorf("invalid email format")
-		}
-	}
-	if contact.Phone != nil && *contact.Phone != "" {
-		if !s.isValidPhone(*contact.Phone) {
-			return fmt.Errorf("invalid phone format")
-		}
-	}
-	return nil
-}
-
-// Helper validation functions
-func (s *Service) isValidEmail(email string) bool {
-	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}// backend/internal/customer/service.go
-package customer
-
-import (
-	"context"
-	"fmt"
-	"regexp"
-	"strings"
-	"time"
-)
-
-type Service struct {
-	repo *Repository
-}
-
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
-}
-
-// GetCustomersForTenant retrieves customers with filtering and analytics
-func (s *Service) GetCustomersForTenant(ctx context.Context, tenantID string, filters CustomerFilters) (*CustomerSearchResponse, error) {
-	if err := s.validateTenantID(tenantID); err != nil {
+// GetCustomerStats returns statistics about customers for a tenant
+func (s *Service) GetCustomerStats(tenantID string) (map[string]interface{}, error) {
+	if err := s.SetTenantContext(tenantID); err != nil {
 		return nil, err
 	}
 
-	// Set default pagination
-	if filters.Limit <= 0 {
-		filters.Limit = 20
-	}
-	if filters.Limit > 100 {
-		filters.Limit = 100
+	query := `
+		SELECT 
+			COUNT(*) as total_customers,
+			COUNT(CASE WHEN deleted = false THEN 1 END) as active_customers,
+			COUNT(CASE WHEN email IS NOT NULL AND email != '' THEN 1 END) as customers_with_email,
+			COUNT(DISTINCT billing_state) as states_covered
+		FROM store.customers_standardized`
+
+	var stats struct {
+		TotalCustomers     int `db:"total_customers"`
+		ActiveCustomers    int `db:"active_customers"`
+		CustomersWithEmail int `db:"customers_with_email"`
+		StatesCovered      int `db:"states_covered"`
 	}
 
-	customers, err := s.repo.GetAllForTenant(ctx, tenantID, filters)
+	err := s.db.Get(&stats, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get customers: %w", err)
+		return nil, fmt.Errorf("failed to get customer stats: %w", err)
 	}
 
-	total, err := s.repo.GetCountForTenant(ctx, tenantID, filters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get customer count: %w", err)
-	}
-
-	page := 1
-	if filters.Offset > 0 && filters.Limit > 0 {
-		page = (filters.Offset / filters.Limit) + 1
-	}
-
-	hasMore := filters.Offset+len(customers) < total
-
-	return &CustomerSearchResponse{
-		Customers: customers,
-		Total:     total,
-		Page:      page,
-		PageSize:  len(customers),
-		HasMore:   hasMore,
+	return map[string]interface{}{
+		"total_customers":      stats.TotalCustomers,
+		"active_customers":     stats.ActiveCustomers,
+		"customers_with_email": stats.CustomersWithEmail,
+		"states_covered":       stats.StatesCovered,
 	}, nil
 }
 
-// GetCustomerByIDForTenant retrieves a single customer with analytics
-func (s *Service) GetCustomerByIDForTenant(ctx context.Context, tenantID string, id int) (*Customer, error) {
-	if err := s.validateTenantID(tenantID); err != nil {
-		return nil, err
+// ValidateCustomer validates customer data
+func (s *Service) ValidateCustomer(customer *Customer) error {
+	var errors []string
+
+	if strings.TrimSpace(customer.Customer) == "" {
+		errors = append(errors, "customer name is required")
 	}
 
-	if id <= 0 {
-		return nil, ErrInvalidCustomerID
+	if strings.TrimSpace(customer.TenantID) == "" {
+		errors = append(errors, "tenant ID is required")
 	}
 
-	customer, err := s.repo.GetByIDForTenant(ctx, tenantID, id)
-	if err != nil {
-		return nil, err
+	// Validate email format if provided
+	if customer.Email != nil && *customer.Email != "" && !isValidEmail(*customer.Email) {
+		errors = append(errors, "invalid email address format")
 	}
 
-	return customer, nil
+	// Validate state code if provided
+	if customer.BillingState != nil && *customer.BillingState != "" && len(*customer.BillingState) > 2 {
+		errors = append(errors, "billing state should be 2-letter code")
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("validation errors: %s", strings.Join(errors, ", "))
+	}
+
+	return nil
 }
 
-// SearchCustomersForTenant provides enhanced search with ranking
-func (s *Service) SearchCustomersForTenant(ctx context.Context, tenantID, query string) ([]Customer, error) {
-	if err := s.validateTenantID(tenantID); err != nil {
-		return nil, err
+// isValidEmail performs comprehensive email validation
+func isValidEmail(email string) bool {
+	if email == "" {
+		return false
 	}
-
-	query = strings.TrimSpace(query)
-)
-	return emailRegex.MatchString(email)
+	
+	// Must contain exactly one @
+	atCount := strings.Count(email, "@")
+	if atCount != 1 {
+		return false
+	}
+	
+	// Split on @
+	parts := strings.Split(email, "@")
+	if len(parts) != 2 {
+		return false
+	}
+	
+	local := parts[0]
+	domain := parts[1]
+	
+	// Local part validations
+	if len(local) == 0 || len(local) > 64 {
+		return false
+	}
+	
+	// Domain part validations
+	if len(domain) == 0 || len(domain) > 253 {
+		return false
+	}
+	
+	// Domain must contain at least one dot
+	if !strings.Contains(domain, ".") {
+		return false
+	}
+	
+	// Domain cannot start or end with dot
+	if strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
+		return false
+	}
+	
+	// Domain cannot have consecutive dots
+	if strings.Contains(domain, "..") {
+		return false
+	}
+	
+	// Split domain parts
+	domainParts := strings.Split(domain, ".")
+	for _, part := range domainParts {
+		if len(part) == 0 {
+			return false
+		}
+	}
+	
+	// Basic character validation (simplified)
+	for _, char := range email {
+		if char < 32 || char > 126 {
+			return false // Non-printable ASCII
+		}
+	}
+	
+	return true
 }
-
-func (s *Service) isValidPhone(phone string) bool {
-	// Basic phone validation - can be enhanced
-	phoneRegex := regexp.MustCompile(`^[\d\s\-\(\)\+\.]{10,20}// backend/internal/customer/service.go
-package customer
-
-import (
-	"context"
-	"fmt"
-	"regexp"
-	"strings"
-	"time"
-)
-
-type Service struct {
-	repo *Repository
-}
-
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
-}
-
-// GetCustomersForTenant retrieves customers with filtering and analytics
-func (s *Service) GetCustomersForTenant(ctx context.Context, tenantID string, filters CustomerFilters) (*CustomerSearchResponse, error) {
-	if err := s.validateTenantID(tenantID); err != nil {
-		return nil, err
-	}
-
-	// Set default pagination
-	if filters.Limit <= 0 {
-		filters.Limit = 20
-	}
-	if filters.Limit > 100 {
-		filters.Limit = 100
-	}
-
-	customers, err := s.repo.GetAllForTenant(ctx, tenantID, filters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get customers: %w", err)
-	}
-
-	total, err := s.repo.GetCountForTenant(ctx, tenantID, filters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get customer count: %w", err)
-	}
-
-	page := 1
-	if filters.Offset > 0 && filters.Limit > 0 {
-		page = (filters.Offset / filters.Limit) + 1
-	}
-
-	hasMore := filters.Offset+len(customers) < total
-
-	return &CustomerSearchResponse{
-		Customers: customers,
-		Total:     total,
-		Page:      page,
-		PageSize:  len(customers),
-		HasMore:   hasMore,
-	}, nil
-}
-
-// GetCustomerByIDForTenant retrieves a single customer with analytics
-func (s *Service) GetCustomerByIDForTenant(ctx context.Context, tenantID string, id int) (*Customer, error) {
-	if err := s.validateTenantID(tenantID); err != nil {
-		return nil, err
-	}
-
-	if id <= 0 {
-		return nil, ErrInvalidCustomerID
-	}
-
-	customer, err := s.repo.GetByIDForTenant(ctx, tenantID, id)
-	if err != nil {
-		return nil, err
-	}
-
-	return customer, nil
-}
-
-// SearchCustomersForTenant provides enhanced search with ranking
-func (s *Service) SearchCustomersForTenant(ctx context.Context, tenantID, query string) ([]Customer, error) {
-	if err := s.validateTenantID(tenantID); err != nil {
-		return nil, err
-	}
-
-	query = strings.TrimSpace(query)
-)
-	return phoneRegex.MatchString(phone)
-}
-
-func (s *Service) isValidStateCode(state string) bool {
-	// US state codes validation
-	validStates := map[string]bool{
-		"AL": true, "AK": true, "AZ": true, "AR": true, "CA": true, "CO": true, "CT": true, "DE": true,
-		"FL": true, "GA": true, "HI": true, "ID": true, "IL": true, "IN": true, "IA": true, "KS": true,
-		"KY": true, "LA": true, "ME": true, "MD": true, "MA": true, "MI": true, "MN": true, "MS": true,
-		"MO": true, "MT": true, "NE": true, "NV": true, "NH": true, "NJ": true, "NM": true, "NY": true,
-		"NC": true, "ND": true, "OH": true, "OK": true, "OR": true, "PA": true, "RI": true, "SC": true,
-		"SD": true, "TN": true, "TX": true, "UT": true, "VT": true, "VA": true, "WA": true, "WV": true,
-		"WI": true, "WY": true, "DC": true,
-	}
-	return validStates[strings.ToUpper(state)]
-}query) < 2 {
-		return nil, fmt.Errorf("search query must be at least 2 characters")
-	}
-
-	if len(

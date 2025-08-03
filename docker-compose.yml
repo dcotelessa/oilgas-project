@@ -14,8 +14,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/migrations:/docker-entrypoint-initdb.d/migrations:ro
-      - ./database/seeds:/docker-entrypoint-initdb.d/seeds:ro
       - ./database/init:/docker-entrypoint-initdb.d:ro
     networks:
       - oilgas-network
@@ -39,8 +37,6 @@ services:
       - "5433:5432"  # Different port for test DB
     volumes:
       - postgres_test_data:/var/lib/postgresql/data
-      - ./database/migrations:/docker-entrypoint-initdb.d/migrations:ro
-      - ./database/test-seeds:/docker-entrypoint-initdb.d/test-seeds:ro
       - ./database/init:/docker-entrypoint-initdb.d:ro
     networks:
       - oilgas-network
