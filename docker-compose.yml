@@ -74,8 +74,8 @@ services:
       dockerfile: ./docker/migrator.Dockerfile
     container_name: oilgas-migrator
     environment:
-      DEV_DATABASE_URL: postgresql://oilgas_user:oilgas_pass@postgres:5432/oilgas_dev
-      TEST_DATABASE_URL: postgresql://oilgas_test_user:oilgas_test_pass@postgres-test:5432/oilgas_test
+      DEV_DATABASE_URL: postgresql://oilgas_user:oilgas_pass@postgres:5432/oilgas_dev?sslmode=disable
+      TEST_DATABASE_URL: postgresql://oilgas_test_user:oilgas_test_pass@postgres-test:5432/oilgas_test?sslmode=disable
     volumes:
       - ./database/data/clean:/app/data:ro
       - ./database/migrations:/app/migrations:ro
@@ -88,7 +88,7 @@ services:
       postgres-test:
         condition: service_healthy
     profiles:
-      - migration  # Only run when explicitly requested
+      - migration
 
 volumes:
   postgres_data:

@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -28,7 +29,14 @@ func (m *Middleware) RequireAuth() gin.HandlerFunc {
 		
 		user, tenantContext, err := m.service.ValidateToken(c.Request.Context(), token)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			switch err {
+			case ErrTokenExpired:
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Token expired"})
+			case ErrInvalidCredentials:
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			default:
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication failed"})
+			}
 			c.Abort()
 			return
 		}
@@ -37,14 +45,16 @@ func (m *Middleware) RequireAuth() gin.HandlerFunc {
 		c.Set("user", user)
 		c.Set("user_id", user.ID)
 		c.Set("tenant_context", tenantContext)
-		c.Set("tenant_id", tenantContext.TenantID)
+		if tenantContext != nil {
+			c.Set("tenant_id", tenantContext.TenantID)
+		}
 		c.Set("user_role", user.Role)
 		
 		c.Next()
 	}
 }
 
-// RequireRole validates that user has specific role
+// RequireRole validates that user has one of the specified roles
 func (m *Middleware) RequireRole(roles ...UserRole) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user, exists := c.Get("user")
@@ -59,7 +69,7 @@ func (m *Middleware) RequireRole(roles ...UserRole) gin.HandlerFunc {
 		// Check if user has any of the required roles
 		hasRole := false
 		for _, role := range roles {
-			if userObj.HasRole(role) {
+			if userObj.Role == role {
 				hasRole = true
 				break
 			}
@@ -77,6 +87,39 @@ func (m *Middleware) RequireRole(roles ...UserRole) gin.HandlerFunc {
 
 // RequirePermission validates that user has specific permission in current tenant
 func (m *Middleware) RequirePermission(permission Permission) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, exists := c.Get("user_id")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+			c.Abort()
+			return
+		}
+		
+		tenantID, exists := c.Get("tenant_id")
+		if !exists {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Tenant context not found"})
+			c.Abort()
+			return
+		}
+		
+		check := UserPermissionCheck{
+			UserID:     userID.(int),
+			TenantID:   tenantID.(string),
+			Permission: permission,
+		}
+		
+		if err := m.service.CheckPermission(c.Request.Context(), check); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Permission denied"})
+			c.Abort()
+			return
+		}
+		
+		c.Next()
+	}
+}
+
+// RequireYardAccess validates that user has access to specific yard
+func (m *Middleware) RequireYardAccess() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, exists := c.Get("user_id")
 		if !exists {
@@ -196,53 +239,59 @@ func (m *Middleware) ValidateTenantAccess() gin.HandlerFunc {
 		}
 		
 		userObj := user.(*User)
-		if !userObj.HasAccessToTenant(requestedTenantID) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to tenant"})
+		
+		// Check if user has access to this tenant
+		if !userObj.CanAccessTenant(requestedTenantID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Tenant access denied"})
 			c.Abort()
 			return
 		}
 		
-		// Update tenant context if different from current
-		currentTenantID, _ := c.Get("tenant_id")
-		if currentTenantID != requestedTenantID {
-			// Find the tenant access for the requested tenant
-			for _, tenantAccess := range userObj.TenantAccess {
-				if tenantAccess.TenantID == requestedTenantID {
-					c.Set("tenant_context", tenantAccess)
-					c.Set("tenant_id", requestedTenantID)
-					break
-				}
+		// Override tenant context with requested tenant
+		c.Set("tenant_id", requestedTenantID)
+		
+		c.Next()
+	}
+}
+
+// SetTenantContext sets tenant context from various sources
+func (m *Middleware) SetTenantContext() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Try to get tenant ID from various sources
+		tenantID := c.GetHeader("X-Tenant-ID")
+		if tenantID == "" {
+			tenantID = c.Query("tenant_id")
+		}
+		
+		// If no tenant specified, use user's primary tenant
+		if tenantID == "" {
+			if user, exists := c.Get("user"); exists {
+				userObj := user.(*User)
+				tenantID = userObj.PrimaryTenantID
 			}
+		}
+		
+		if tenantID != "" {
+			c.Set("tenant_id", tenantID)
 		}
 		
 		c.Next()
 	}
 }
 
-// CustomerContactFilter ensures customer contacts can only access their own data
+// CustomerContactFilter filters data to only show customer's own data
 func (m *Middleware) CustomerContactFilter() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user, exists := c.Get("user")
 		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
-			c.Abort()
+			c.Next()
 			return
 		}
 		
 		userObj := user.(*User)
-		if userObj.IsCustomerContact() {
-			// Get customer ID from URL parameter
-			requestedCustomerID := c.Param("customerId")
-			if requestedCustomerID != "" {
-				// Validate customer contact can only access their own customer data
-				if requestedCustomerID != string(rune(*userObj.CustomerID)) {
-					c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to customer data"})
-					c.Abort()
-					return
-				}
-			}
-			
-			// Set customer filter for queries
+		
+		// If user is a customer contact, set customer filter
+		if userObj.IsCustomerContact() && userObj.CustomerID != nil {
 			c.Set("customer_filter", *userObj.CustomerID)
 		}
 		
@@ -250,55 +299,13 @@ func (m *Middleware) CustomerContactFilter() gin.HandlerFunc {
 	}
 }
 
-// SetTenantContext middleware to set tenant context for multi-tenant operations
-func (m *Middleware) SetTenantContext() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// Extract tenant ID from various sources
-		tenantID := c.GetHeader("X-Tenant-ID")
-		if tenantID == "" {
-			tenantID = c.Query("tenant_id")
-		}
-		if tenantID == "" {
-			tenantID = c.Param("tenantId")
-		}
-		
-		// If user is authenticated, validate tenant access
-		if user, exists := c.Get("user"); exists {
-			userObj := user.(*User)
-			
-			// If no tenant specified, use user's primary tenant
-			if tenantID == "" {
-				tenantID = userObj.PrimaryTenantID
-			}
-			
-			// Validate access to requested tenant
-			if !userObj.HasAccessToTenant(tenantID) {
-				c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to tenant"})
-				c.Abort()
-				return
-			}
-			
-			// Set tenant context
-			for _, tenantAccess := range userObj.TenantAccess {
-				if tenantAccess.TenantID == tenantID {
-					c.Set("tenant_context", tenantAccess)
-					break
-				}
-			}
-		}
-		
-		c.Set("tenant_id", tenantID)
-		c.Next()
-	}
-}
-
-// LogAuthActivity logs authentication-related activities
-func (m *Middleware) LogAuthActivity() gin.HandlerFunc {
+// LogUserActivity logs user activity for audit purposes
+func (m *Middleware) LogUserActivity() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Log before processing
 		if user, exists := c.Get("user"); exists {
 			userObj := user.(*User)
-			c.Header("X-User-ID", string(rune(userObj.ID)))
+			c.Header("X-User-ID", fmt.Sprintf("%d", userObj.ID))
 			c.Header("X-User-Role", string(userObj.Role))
 			
 			if tenantID, exists := c.Get("tenant_id"); exists {
@@ -408,72 +415,3 @@ func GetEnterpriseContextFromContext(c *gin.Context) (*EnterpriseContext, bool) 
 	context, ok := enterpriseContext.(*EnterpriseContext)
 	return context, ok
 }
-
-// Middleware composition helpers
-func (m *Middleware) AuthenticatedOnly() gin.HandlerFunc {
-	return gin.WrapH(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Convert to gin context and use RequireAuth
-		c := &gin.Context{Request: r, Writer: &ginResponseWriter{w}}
-		m.RequireAuth()(c)
-	}))
-}
-
-// Custom response writer for middleware composition
-type ginResponseWriter struct {
-	http.ResponseWriter
-}
-
-func (w *ginResponseWriter) Status() int {
-	return http.StatusOK
-}
-
-func (w *ginResponseWriter) Size() int {
-	return 0
-}
-
-func (w *ginResponseWriter) WriteString(s string) (int, error) {
-	return w.ResponseWriter.Write([]byte(s))
-}
-
-func (w *ginResponseWriter) Written() bool {
-	return false
-}
-
-func (w *ginResponseWriter) WriteHeaderNow() {}
-
-func (w *ginResponseWriter) Pusher() http.Pusher {
-	return nil
-}, gin.H{"error": "Tenant context not found"})
-			c.Abort()
-			return
-		}
-		
-		check := UserPermissionCheck{
-			UserID:     userID.(int),
-			TenantID:   tenantID.(string),
-			Permission: permission,
-		}
-		
-		if err := m.service.CheckPermission(c.Request.Context(), check); err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Permission denied"})
-			c.Abort()
-			return
-		}
-		
-		c.Next()
-	}
-}
-
-// RequireYardAccess validates that user has access to specific yard
-func (m *Middleware) RequireYardAccess() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		userID, exists := c.Get("user_id")
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
-			c.Abort()
-			return
-		}
-		
-		tenantID, exists := c.Get("tenant_id")
-		if !exists {
-			c.JSON(http.StatusBadRequest

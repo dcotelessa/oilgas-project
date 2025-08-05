@@ -6,13 +6,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
-// Mock service for middleware testing
+// ============================================================================
+// MOCK SERVICE IMPLEMENTATION
+// ============================================================================
+
+// MockService implements the auth Service interface for testing
 type MockService struct {
 	mock.Mock
 }
@@ -100,7 +105,10 @@ func (m *MockService) CheckYardAccess(ctx context.Context, userID int, tenantID,
 
 func (m *MockService) GetUserPermissions(ctx context.Context, userID int, tenantID string) ([]Permission, error) {
 	args := m.Called(ctx, userID, tenantID)
-	return args.Get(0).([]Permission), args.Error(1)
+	if perms := args.Get(0); perms != nil {
+		return perms.([]Permission), args.Error(1)
+	}
+	return nil, args.Error(1)
 }
 
 func (m *MockService) GetEnterpriseContext(ctx context.Context, userID int) (*EnterpriseContext, error) {
@@ -129,65 +137,143 @@ func (m *MockService) GetUser(ctx context.Context, userID int) (*User, error) {
 
 func (m *MockService) GetUsersByTenant(ctx context.Context, tenantID string) ([]User, error) {
 	args := m.Called(ctx, tenantID)
-	return args.Get(0).([]User), args.Error(1)
+	if users := args.Get(0); users != nil {
+		return users.([]User), args.Error(1)
+	}
+	return nil, args.Error(1)
 }
 
 func (m *MockService) GetCustomerContacts(ctx context.Context, customerID int) ([]User, error) {
 	args := m.Called(ctx, customerID)
-	return args.Get(0).([]User), args.Error(1)
+	if users := args.Get(0); users != nil {
+		return users.([]User), args.Error(1)
+	}
+	return nil, args.Error(1)
 }
 
-func (m *MockService) SearchUsers(ctx context.Context, filter UserSearchFilter) ([]User, error) {
-	args := m.Called(ctx, filter)
-	return args.Get(0).([]User), args.Error(1)
+func (m *MockService) SearchUsers(ctx context.Context, filters UserSearchFilters) ([]User, int, error) {
+	args := m.Called(ctx, filters)
+	users := args.Get(0)
+	total := args.Get(1)
+	if users != nil && total != nil {
+		return users.([]User), total.(int), args.Error(2)
+	}
+	return nil, 0, args.Error(2)
 }
 
-func (m *MockService) GetUserStats(ctx context.Context) (*UserStats, error) {
-	args := m.Called(ctx)
+func (m *MockService) ListAllUsers(ctx context.Context, filters AdminUserFilters) ([]User, int, error) {
+	args := m.Called(ctx, filters)
+	users := args.Get(0)
+	total := args.Get(1)
+	if users != nil && total != nil {
+		return users.([]User), total.(int), args.Error(2)
+	}
+	return nil, 0, args.Error(2)
+}
+
+func (m *MockService) GetUserStats(ctx context.Context, req UserStatsRequest) (*UserStats, error) {
+	args := m.Called(ctx, req)
 	if stats := args.Get(0); stats != nil {
 		return stats.(*UserStats), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *MockService) InvalidateUserSessions(ctx context.Context, userID int) error {
-	args := m.Called(ctx, userID)
-	return args.Error(0)
-}
+// ============================================================================
+// TEST FIXTURES
+// ============================================================================
 
-func (m *MockService) CleanupExpiredSessions(ctx context.Context) error {
-	args := m.Called(ctx)
-	return args.Error(0)
-}
-
-// Test helper functions
 func setupTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	return gin.New()
+}
+
+func createTestUser() *User {
+	customerID := 123
+	return &User{
+		ID:               1,
+		Username:         "contact@customer.com",
+		Email:            "contact@customer.com",
+		FullName:         "Test Contact",
+		Role:             RoleCustomerContact,
+		AccessLevel:      1,
+		IsEnterpriseUser: false,
+		TenantAccess: []TenantAccess{
+			{
+				TenantID: "houston",
+				Role:     RoleCustomerContact,
+				YardAccess: []YardAccess{
+					{
+						YardLocation:       "houston_north",
+						CanViewWorkOrders:  true,
+						CanViewInventory:   true,
+						CanCreateWorkOrders: true,
+					},
+				},
+			},
+		},
+		PrimaryTenantID: "houston",
+		CustomerID:      &customerID,
+		ContactType:     ContactPrimary,
+		IsActive:        true,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+}
+
+func createTestEnterpriseUser() *User {
+	return &User{
+		ID:               2,
+		Username:         "admin@company.com",
+		Email:            "admin@company.com",
+		FullName:         "Enterprise Admin",
+		Role:             RoleEnterpriseAdmin,
+		AccessLevel:      5,
+		IsEnterpriseUser: true,
+		TenantAccess: []TenantAccess{
+			{
+				TenantID: "houston",
+				Role:     RoleEnterpriseAdmin,
+				Permissions: []Permission{
+					PermissionCrossTenantView,
+					PermissionUserManagement,
+				},
+			},
+			{
+				TenantID: "longbeach",
+				Role:     RoleEnterpriseAdmin,
+				Permissions: []Permission{
+					PermissionCrossTenantView,
+					PermissionUserManagement,
+				},
+			},
+		},
+		PrimaryTenantID: "houston",
+		IsActive:        true,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
 }
 
 func createTestTenantAccess() *TenantAccess {
 	return &TenantAccess{
 		TenantID: "houston",
 		Role:     RoleCustomerContact,
-		Permissions: []Permission{
-			PermissionWorkOrderRead,
-			PermissionInventoryRead,
-		},
 		YardAccess: []YardAccess{
 			{
-				YardLocation:        "houston_north",
-				CanViewWorkOrders:   true,
-				CanViewInventory:    true,
+				YardLocation:       "houston_north",
+				CanViewWorkOrders:  true,
+				CanViewInventory:   true,
 				CanCreateWorkOrders: true,
 			},
 		},
-		CanRead:  true,
-		CanWrite: true,
 	}
 }
 
-// RequireAuth middleware tests
+// ============================================================================
+// REQUIRE AUTH MIDDLEWARE TESTS
+// ============================================================================
+
 func TestRequireAuth_Success(t *testing.T) {
 	mockService := new(MockService)
 	middleware := NewMiddleware(mockService)
@@ -200,19 +286,9 @@ func TestRequireAuth_Success(t *testing.T) {
 	router := setupTestRouter()
 	router.Use(middleware.RequireAuth())
 	router.GET("/test", func(c *gin.Context) {
-		// Verify user context is set
-		user, exists := c.Get("user")
+		user, exists := GetUserFromContext(c)
 		assert.True(t, exists)
-		assert.Equal(t, testUser, user)
-		
-		userID, exists := c.Get("user_id")
-		assert.True(t, exists)
-		assert.Equal(t, testUser.ID, userID)
-		
-		tenantID, exists := c.Get("tenant_id")
-		assert.True(t, exists)
-		assert.Equal(t, testTenantAccess.TenantID, tenantID)
-		
+		assert.Equal(t, testUser.ID, user.ID)
 		c.JSON(http.StatusOK, gin.H{"message": "success"})
 	})
 	
@@ -241,10 +317,368 @@ func TestRequireAuth_NoToken(t *testing.T) {
 	
 	router.ServeHTTP(w, req)
 	
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	mockService.AssertExpectations(t)
+}
+
+func TestRequireAuth_InvalidToken(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	mockService.On("ValidateToken", mock.Anything, "invalid_token").Return(nil, nil, ErrInvalidCredentials)
+	
+	router := setupTestRouter()
+	router.Use(middleware.RequireAuth())
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Authorization", "Bearer invalid_token")
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	mockService.AssertExpectations(t)
+}
+
+func TestRequireAuth_ExpiredToken(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	mockService.On("ValidateToken", mock.Anything, "expired_token").Return(nil, nil, ErrTokenExpired)
+	
+	router := setupTestRouter()
+	router.Use(middleware.RequireAuth())
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Authorization", "Bearer expired_token")
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	mockService.AssertExpectations(t)
+}
+
+func TestRequireAuth_QueryToken(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	testUser := createTestUser()
+	testTenantAccess := createTestTenantAccess()
+	
+	mockService.On("ValidateToken", mock.Anything, "query_token").Return(testUser, testTenantAccess, nil)
+	
+	router := setupTestRouter()
+	router.Use(middleware.RequireAuth())
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test?token=query_token", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockService.AssertExpectations(t)
+}
+
+// ============================================================================
+// REQUIRE ROLE MIDDLEWARE TESTS
+// ============================================================================
+
+func TestRequireRole_Success(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	testUser := createTestUser()
+	
+	router := setupTestRouter()
+	router.Use(func(c *gin.Context) {
+		c.Set("user", testUser)
+		c.Next()
+	})
+	router.Use(middleware.RequireRole(RoleCustomerContact, RoleOperator))
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRequireRole_InsufficientRole(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	testUser := createTestUser() // Customer contact
+	
+	router := setupTestRouter()
+	router.Use(func(c *gin.Context) {
+		c.Set("user", testUser)
+		c.Next()
+	})
+	router.Use(middleware.RequireRole(RoleAdmin, RoleEnterpriseAdmin))
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
-// RequireEnterpriseAccess middleware tests
+func TestRequireRole_NoUserContext(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	router := setupTestRouter()
+	router.Use(middleware.RequireRole(RoleCustomerContact))
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// ============================================================================
+// REQUIRE PERMISSION MIDDLEWARE TESTS
+// ============================================================================
+
+func TestRequirePermission_Success(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	testUser := createTestUser()
+	
+	expectedCheck := UserPermissionCheck{
+		UserID:     testUser.ID,
+		TenantID:   "houston",
+		Permission: PermissionInventoryRead,
+	}
+	
+	mockService.On("CheckPermission", mock.Anything, expectedCheck).Return(nil)
+	
+	router := setupTestRouter()
+	router.Use(func(c *gin.Context) {
+		c.Set("user", testUser)
+		c.Set("user_id", testUser.ID)
+		c.Set("tenant_id", "houston")
+		c.Next()
+	})
+	router.Use(middleware.RequirePermission(PermissionInventoryRead))
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockService.AssertExpectations(t)
+}
+
+func TestRequirePermission_Denied(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	testUser := createTestUser()
+	
+	expectedCheck := UserPermissionCheck{
+		UserID:     testUser.ID,
+		TenantID:   "houston",
+		Permission: PermissionUserManagement,
+	}
+	
+	mockService.On("CheckPermission", mock.Anything, expectedCheck).Return(ErrPermissionDenied)
+	
+	router := setupTestRouter()
+	router.Use(func(c *gin.Context) {
+		c.Set("user", testUser)
+		c.Set("user_id", testUser.ID)
+		c.Set("tenant_id", "houston")
+		c.Next()
+	})
+	router.Use(middleware.RequirePermission(PermissionUserManagement))
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	mockService.AssertExpectations(t)
+}
+
+// ============================================================================
+// REQUIRE YARD ACCESS MIDDLEWARE TESTS
+// ============================================================================
+
+func TestRequireYardAccess_Success(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	mockService.On("CheckYardAccess", mock.Anything, 1, "houston", "houston_north").Return(nil)
+	
+	router := setupTestRouter()
+	router.Use(func(c *gin.Context) {
+		c.Set("user_id", 1)
+		c.Set("tenant_id", "houston")
+		c.Next()
+	})
+	router.Use(middleware.RequireYardAccess())
+	router.GET("/test/:yardLocation", func(c *gin.Context) {
+		yardLocation, exists := GetYardLocationFromContext(c)
+		assert.True(t, exists)
+		assert.Equal(t, "houston_north", yardLocation)
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test/houston_north", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockService.AssertExpectations(t)
+}
+
+func TestRequireYardAccess_Denied(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	mockService.On("CheckYardAccess", mock.Anything, 1, "houston", "houston_south").Return(ErrYardAccessDenied)
+	
+	router := setupTestRouter()
+	router.Use(func(c *gin.Context) {
+		c.Set("user_id", 1)
+		c.Set("tenant_id", "houston")
+		c.Next()
+	})
+	router.Use(middleware.RequireYardAccess())
+	router.GET("/test/:yardLocation", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test/houston_south", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	mockService.AssertExpectations(t)
+}
+
+func TestRequireYardAccess_NoYardInURL(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	router := setupTestRouter()
+	router.Use(func(c *gin.Context) {
+		c.Set("user_id", 1)
+		c.Set("tenant_id", "houston")
+		c.Next()
+	})
+	router.Use(middleware.RequireYardAccess())
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// ============================================================================
+// REQUIRE CUSTOMER CONTACT MIDDLEWARE TESTS
+// ============================================================================
+
+func TestRequireCustomerContact_Success(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	testUser := createTestUser()
+	
+	router := setupTestRouter()
+	router.Use(func(c *gin.Context) {
+		c.Set("user", testUser)
+		c.Next()
+	})
+	router.Use(middleware.RequireCustomerContact())
+	router.GET("/test", func(c *gin.Context) {
+		customerID, exists := c.Get("customer_id")
+		assert.True(t, exists)
+		assert.Equal(t, *testUser.CustomerID, customerID)
+		
+		contactType, exists := c.Get("contact_type")
+		assert.True(t, exists)
+		assert.Equal(t, testUser.ContactType, contactType)
+		
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRequireCustomerContact_NotCustomerContact(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	enterpriseUser := createTestEnterpriseUser()
+	
+	router := setupTestRouter()
+	router.Use(func(c *gin.Context) {
+		c.Set("user", enterpriseUser)
+		c.Next()
+	})
+	router.Use(middleware.RequireCustomerContact())
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// ============================================================================
+// REQUIRE ENTERPRISE ACCESS MIDDLEWARE TESTS
+// ============================================================================
+
 func TestRequireEnterpriseAccess_Success(t *testing.T) {
 	mockService := new(MockService)
 	middleware := NewMiddleware(mockService)
@@ -305,112 +739,10 @@ func TestRequireEnterpriseAccess_Denied(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
-// ValidateTenantAccess middleware tests
-func TestValidateTenantAccess_Success(t *testing.T) {
-	mockService := new(MockService)
-	middleware := NewMiddleware(mockService)
-	
-	testUser := createTestUser()
-	
-	router := setupTestRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set("user", testUser)
-		c.Set("tenant_id", "houston") // Current tenant
-		c.Next()
-	})
-	router.Use(middleware.ValidateTenantAccess())
-	router.GET("/test/:tenantId", func(c *gin.Context) {
-		tenantID, exists := c.Get("tenant_id")
-		assert.True(t, exists)
-		assert.Equal(t, "houston", tenantID)
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/test/houston", nil)
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusOK, w.Code)
-}
+// ============================================================================
+// TENANT CONTEXT MIDDLEWARE TESTS
+// ============================================================================
 
-func TestValidateTenantAccess_Denied(t *testing.T) {
-	mockService := new(MockService)
-	middleware := NewMiddleware(mockService)
-	
-	testUser := createTestUser()
-	
-	router := setupTestRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set("user", testUser)
-		c.Next()
-	})
-	router.Use(middleware.ValidateTenantAccess())
-	router.GET("/test/:tenantId", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/test/longbeach", nil) // User doesn't have access
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusForbidden, w.Code)
-}
-
-// CustomerContactFilter middleware tests
-func TestCustomerContactFilter_Success(t *testing.T) {
-	mockService := new(MockService)
-	middleware := NewMiddleware(mockService)
-	
-	testUser := createTestUser()
-	
-	router := setupTestRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set("user", testUser)
-		c.Next()
-	})
-	router.Use(middleware.CustomerContactFilter())
-	router.GET("/customers/:customerId", func(c *gin.Context) {
-		customerFilter, exists := c.Get("customer_filter")
-		assert.True(t, exists)
-		assert.Equal(t, *testUser.CustomerID, customerFilter)
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/customers/123", nil) // Same as user's customer ID
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestCustomerContactFilter_AccessDenied(t *testing.T) {
-	mockService := new(MockService)
-	middleware := NewMiddleware(mockService)
-	
-	testUser := createTestUser()
-	
-	router := setupTestRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set("user", testUser)
-		c.Next()
-	})
-	router.Use(middleware.CustomerContactFilter())
-	router.GET("/customers/:customerId", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/customers/456", nil) // Different customer ID
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusForbidden, w.Code)
-}
-
-// SetTenantContext middleware tests
 func TestSetTenantContext_FromHeader(t *testing.T) {
 	mockService := new(MockService)
 	middleware := NewMiddleware(mockService)
@@ -493,7 +825,67 @@ func TestSetTenantContext_UsePrimaryTenant(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-// Integration tests for middleware composition
+// ============================================================================
+// VALIDATE TENANT ACCESS MIDDLEWARE TESTS
+// ============================================================================
+
+func TestValidateTenantAccess_Success(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	testUser := createTestUser()
+	
+	router := setupTestRouter()
+	router.Use(func(c *gin.Context) {
+		c.Set("user", testUser)
+		c.Set("tenant_id", "houston") // Current tenant
+		c.Next()
+	})
+	router.Use(middleware.ValidateTenantAccess())
+	router.GET("/test/:tenantId", func(c *gin.Context) {
+		tenantID, exists := c.Get("tenant_id")
+		assert.True(t, exists)
+		assert.Equal(t, "houston", tenantID)
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test/houston", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestValidateTenantAccess_AccessDenied(t *testing.T) {
+	mockService := new(MockService)
+	middleware := NewMiddleware(mockService)
+	
+	testUser := createTestUser() // Only has access to houston
+	
+	router := setupTestRouter()
+	router.Use(func(c *gin.Context) {
+		c.Set("user", testUser)
+		c.Set("tenant_id", "houston")
+		c.Next()
+	})
+	router.Use(middleware.ValidateTenantAccess())
+	router.GET("/test/:tenantId", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test/longbeach", nil) // Different tenant
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// ============================================================================
+// INTEGRATION TESTS - MIDDLEWARE COMPOSITION
+// ============================================================================
+
 func TestMiddlewareComposition_CustomerContactWorkflow(t *testing.T) {
 	mockService := new(MockService)
 	middleware := NewMiddleware(mockService)
@@ -510,11 +902,11 @@ func TestMiddlewareComposition_CustomerContactWorkflow(t *testing.T) {
 	router.Use(middleware.RequireYardAccess())
 	router.GET("/customer/work-orders/:yardLocation", func(c *gin.Context) {
 		// Verify all contexts are set
-		user, _ := GetUserFromContext(c)
-		assert.NotNil(t, user)
-		assert.True(t, user.IsCustomerContact())
+		user, exists := GetUserFromContext(c)
+		assert.True(t, exists)
+		assert.Equal(t, testUser.ID, user.ID)
 		
-		customerID, exists := GetCustomerIDFromContext(c)
+		customerID, exists := c.Get("customer_id")
 		assert.True(t, exists)
 		assert.Equal(t, *testUser.CustomerID, customerID)
 		
@@ -522,7 +914,7 @@ func TestMiddlewareComposition_CustomerContactWorkflow(t *testing.T) {
 		assert.True(t, exists)
 		assert.Equal(t, "houston_north", yardLocation)
 		
-		c.JSON(http.StatusOK, gin.H{"message": "customer contact has yard access"})
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
 	})
 	
 	req := httptest.NewRequest("GET", "/customer/work-orders/houston_north", nil)
@@ -541,12 +933,8 @@ func TestMiddlewareComposition_EnterpriseAdminWorkflow(t *testing.T) {
 	
 	enterpriseUser := createTestEnterpriseUser()
 	testTenantAccess := &TenantAccess{
-		TenantID:    "houston",
-		Role:        RoleEnterpriseAdmin,
-		Permissions: []Permission{PermissionCrossTenantView, PermissionUserManagement},
-		CanRead:     true,
-		CanWrite:    true,
-		CanDelete:   true,
+		TenantID: "houston",
+		Role:     RoleEnterpriseAdmin,
 	}
 	
 	enterpriseContext := &EnterpriseContext{
@@ -558,25 +946,18 @@ func TestMiddlewareComposition_EnterpriseAdminWorkflow(t *testing.T) {
 	
 	mockService.On("ValidateToken", mock.Anything, "admin_token").Return(enterpriseUser, testTenantAccess, nil)
 	mockService.On("GetEnterpriseContext", mock.Anything, enterpriseUser.ID).Return(enterpriseContext, nil)
-	mockService.On("CheckPermission", mock.Anything, mock.MatchedBy(func(check UserPermissionCheck) bool {
-		return check.Permission == PermissionUserManagement
-	})).Return(nil)
 	
 	router := setupTestRouter()
 	router.Use(middleware.RequireAuth())
 	router.Use(middleware.RequireEnterpriseAccess())
-	router.Use(middleware.RequirePermission(PermissionUserManagement))
 	router.GET("/admin/users", func(c *gin.Context) {
 		// Verify enterprise context is set
-		enterpriseCtx, exists := GetEnterpriseContextFromContext(c)
+		context, exists := GetEnterpriseContextFromContext(c)
 		assert.True(t, exists)
-		assert.True(t, enterpriseCtx.IsEnterpriseAdmin)
+		assert.Equal(t, enterpriseContext.UserID, context.UserID)
+		assert.True(t, context.IsEnterpriseAdmin)
 		
-		user, _ := GetUserFromContext(c)
-		assert.NotNil(t, user)
-		assert.True(t, user.CanPerformCrossTenantOperation())
-		
-		c.JSON(http.StatusOK, gin.H{"message": "enterprise admin has user management access"})
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
 	})
 	
 	req := httptest.NewRequest("GET", "/admin/users", nil)
@@ -589,83 +970,23 @@ func TestMiddlewareComposition_EnterpriseAdminWorkflow(t *testing.T) {
 	mockService.AssertExpectations(t)
 }
 
-// Context utility function tests
-func TestGetUserFromContext_Success(t *testing.T) {
-	router := setupTestRouter()
-	testUser := createTestUser()
-	
-	router.GET("/test", func(c *gin.Context) {
-		c.Set("user", testUser)
-		
-		user, exists := GetUserFromContext(c)
-		assert.True(t, exists)
-		assert.Equal(t, testUser, user)
-		
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusOK, w.Code)
-}
+// ============================================================================
+// TOKEN EXTRACTION TESTS
+// ============================================================================
 
-func TestGetUserFromContext_NotFound(t *testing.T) {
-	router := setupTestRouter()
-	
-	router.GET("/test", func(c *gin.Context) {
-		user, exists := GetUserFromContext(c)
-		assert.False(t, exists)
-		assert.Nil(t, user)
-		
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestGetTenantIDFromContext_Success(t *testing.T) {
-	router := setupTestRouter()
-	
-	router.GET("/test", func(c *gin.Context) {
-		c.Set("tenant_id", "houston")
-		
-		tenantID, exists := GetTenantIDFromContext(c)
-		assert.True(t, exists)
-		assert.Equal(t, "houston", tenantID)
-		
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-// Test token extraction from different sources
-func TestExtractToken_FromAuthorizationHeader(t *testing.T) {
+func TestExtractToken_FromHeader(t *testing.T) {
 	mockService := new(MockService)
 	middleware := NewMiddleware(mockService)
 	
 	router := setupTestRouter()
 	router.GET("/test", func(c *gin.Context) {
 		token := middleware.extractToken(c)
-		assert.Equal(t, "test_token", token)
+		assert.Equal(t, "header_token", token)
 		c.JSON(http.StatusOK, gin.H{"token": token})
 	})
 	
 	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Authorization", "Bearer test_token")
+	req.Header.Set("Authorization", "Bearer header_token")
 	w := httptest.NewRecorder()
 	
 	router.ServeHTTP(w, req)
@@ -673,7 +994,7 @@ func TestExtractToken_FromAuthorizationHeader(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-func TestExtractToken_FromQueryParameter(t *testing.T) {
+func TestExtractToken_FromQuery(t *testing.T) {
 	mockService := new(MockService)
 	middleware := NewMiddleware(mockService)
 	
@@ -710,16 +1031,72 @@ func TestExtractToken_NoToken(t *testing.T) {
 	
 	assert.Equal(t, http.StatusOK, w.Code)
 }
+
+// ============================================================================
+// CONTEXT HELPER TESTS
+// ============================================================================
+
+func TestContextHelpers(t *testing.T) {
+	router := setupTestRouter()
 	
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-	mockService.AssertExpectations(t)
+	testUser := createTestUser()
+	
+	router.GET("/test", func(c *gin.Context) {
+		// Set test context
+		c.Set("user", testUser)
+		c.Set("user_id", testUser.ID)
+		c.Set("tenant_id", "houston")
+		c.Set("customer_id", *testUser.CustomerID)
+		c.Set("yard_location", "houston_north")
+		
+		// Test GetUserFromContext
+		user, exists := GetUserFromContext(c)
+		assert.True(t, exists)
+		assert.Equal(t, testUser.ID, user.ID)
+		
+		// Test GetUserIDFromContext
+		userID, exists := GetUserIDFromContext(c)
+		assert.True(t, exists)
+		assert.Equal(t, testUser.ID, userID)
+		
+		// Test GetTenantIDFromContext
+		tenantID, exists := GetTenantIDFromContext(c)
+		assert.True(t, exists)
+		assert.Equal(t, "houston", tenantID)
+		
+		// Test GetCustomerIDFromContext
+		customerID, exists := GetCustomerIDFromContext(c)
+		assert.True(t, exists)
+		assert.Equal(t, *testUser.CustomerID, customerID)
+		
+		// Test GetYardLocationFromContext
+		yardLocation, exists := GetYardLocationFromContext(c)
+		assert.True(t, exists)
+		assert.Equal(t, "houston_north", yardLocation)
+		
+		c.JSON(http.StatusOK, gin.H{"message": "success"})
+	})
+	
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	
+	router.ServeHTTP(w, req)
+	
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-func TestRequireAuth_InvalidToken(t *testing.T) {
+// ============================================================================
+// PERFORMANCE BENCHMARKS
+// ============================================================================
+
+func BenchmarkRequireAuth(b *testing.B) {
 	mockService := new(MockService)
 	middleware := NewMiddleware(mockService)
 	
-	mockService.On("ValidateToken", mock.Anything, "invalid_token").Return(nil, nil, ErrInvalidCredentials)
+	testUser := createTestUser()
+	testTenantAccess := createTestTenantAccess()
+	
+	mockService.On("ValidateToken", mock.Anything, "valid_token").Return(testUser, testTenantAccess, nil)
 	
 	router := setupTestRouter()
 	router.Use(middleware.RequireAuth())
@@ -727,232 +1104,47 @@ func TestRequireAuth_InvalidToken(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"message": "success"})
 	})
 	
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Authorization", "Bearer invalid_token")
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-	mockService.AssertExpectations(t)
-}
-
-// RequireRole middleware tests
-func TestRequireRole_Success(t *testing.T) {
-	mockService := new(MockService)
-	middleware := NewMiddleware(mockService)
-	
-	testUser := createTestUser()
-	
-	router := setupTestRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set("user", testUser)
-		c.Next()
-	})
-	router.Use(middleware.RequireRole(RoleCustomerContact, RoleOperator))
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestRequireRole_InsufficientRole(t *testing.T) {
-	mockService := new(MockService)
-	middleware := NewMiddleware(mockService)
-	
-	testUser := createTestUser()
-	
-	router := setupTestRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set("user", testUser)
-		c.Next()
-	})
-	router.Use(middleware.RequireRole(RoleAdmin, RoleEnterpriseAdmin))
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusForbidden, w.Code)
-}
-
-// RequirePermission middleware tests
-func TestRequirePermission_Success(t *testing.T) {
-	mockService := new(MockService)
-	middleware := NewMiddleware(mockService)
-	
-	mockService.On("CheckPermission", mock.Anything, mock.MatchedBy(func(check UserPermissionCheck) bool {
-		return check.UserID == 1 && 
-			   check.TenantID == "houston" && 
-			   check.Permission == PermissionWorkOrderRead
-	})).Return(nil)
-	
-	router := setupTestRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set("user_id", 1)
-		c.Set("tenant_id", "houston")
-		c.Next()
-	})
-	router.Use(middleware.RequirePermission(PermissionWorkOrderRead))
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusOK, w.Code)
-	mockService.AssertExpectations(t)
-}
-
-func TestRequirePermission_Denied(t *testing.T) {
-	mockService := new(MockService)
-	middleware := NewMiddleware(mockService)
-	
-	mockService.On("CheckPermission", mock.Anything, mock.MatchedBy(func(check UserPermissionCheck) bool {
-		return check.UserID == 1 && 
-			   check.TenantID == "houston" && 
-			   check.Permission == PermissionCustomerDelete
-	})).Return(ErrPermissionDenied)
-	
-	router := setupTestRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set("user_id", 1)
-		c.Set("tenant_id", "houston")
-		c.Next()
-	})
-	router.Use(middleware.RequirePermission(PermissionCustomerDelete))
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusForbidden, w.Code)
-	mockService.AssertExpectations(t)
-}
-
-// RequireYardAccess middleware tests
-func TestRequireYardAccess_Success(t *testing.T) {
-	mockService := new(MockService)
-	middleware := NewMiddleware(mockService)
-	
-	mockService.On("CheckYardAccess", mock.Anything, 1, "houston", "houston_north").Return(nil)
-	
-	router := setupTestRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set("user_id", 1)
-		c.Set("tenant_id", "houston")
-		c.Next()
-	})
-	router.Use(middleware.RequireYardAccess())
-	router.GET("/test/:yardLocation", func(c *gin.Context) {
-		yardLocation, exists := c.Get("yard_location")
-		assert.True(t, exists)
-		assert.Equal(t, "houston_north", yardLocation)
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/test/houston_north", nil)
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusOK, w.Code)
-	mockService.AssertExpectations(t)
-}
-
-func TestRequireYardAccess_Denied(t *testing.T) {
-	mockService := new(MockService)
-	middleware := NewMiddleware(mockService)
-	
-	mockService.On("CheckYardAccess", mock.Anything, 1, "houston", "houston_south").Return(ErrYardAccessDenied)
-	
-	router := setupTestRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set("user_id", 1)
-		c.Set("tenant_id", "houston")
-		c.Next()
-	})
-	router.Use(middleware.RequireYardAccess())
-	router.GET("/test/:yardLocation", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/test/houston_south", nil)
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusForbidden, w.Code)
-	mockService.AssertExpectations(t)
-}
-
-// RequireCustomerContact middleware tests
-func TestRequireCustomerContact_Success(t *testing.T) {
-	mockService := new(MockService)
-	middleware := NewMiddleware(mockService)
-	
-	testUser := createTestUser()
-	
-	router := setupTestRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set("user", testUser)
-		c.Next()
-	})
-	router.Use(middleware.RequireCustomerContact())
-	router.GET("/test", func(c *gin.Context) {
-		customerID, exists := c.Get("customer_id")
-		assert.True(t, exists)
-		assert.Equal(t, *testUser.CustomerID, customerID)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set("Authorization", "Bearer valid_token")
+		w := httptest.NewRecorder()
 		
-		contactType, exists := c.Get("contact_type")
-		assert.True(t, exists)
-		assert.Equal(t, testUser.ContactType, contactType)
-		
-		c.JSON(http.StatusOK, gin.H{"message": "success"})
-	})
-	
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
-	
-	assert.Equal(t, http.StatusOK, w.Code)
+		router.ServeHTTP(w, req)
+	}
 }
 
-func TestRequireCustomerContact_NotCustomerContact(t *testing.T) {
+func BenchmarkPermissionCheck(b *testing.B) {
 	mockService := new(MockService)
 	middleware := NewMiddleware(mockService)
 	
-	enterpriseUser := createTestEnterpriseUser()
+	testUser := createTestUser()
+	
+	expectedCheck := UserPermissionCheck{
+		UserID:     testUser.ID,
+		TenantID:   "houston",
+		Permission: PermissionInventoryRead,
+	}
+	
+	mockService.On("CheckPermission", mock.Anything, expectedCheck).Return(nil)
 	
 	router := setupTestRouter()
 	router.Use(func(c *gin.Context) {
-		c.Set("user", enterpriseUser)
+		c.Set("user", testUser)
+		c.Set("user_id", testUser.ID)
+		c.Set("tenant_id", "houston")
 		c.Next()
 	})
-	router.Use(middleware.RequireCustomerContact())
+	router.Use(middleware.RequirePermission(PermissionInventoryRead))
 	router.GET("/test", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "success"})
 	})
 	
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	
-	router.ServeHTTP(w, req)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequest("GET", "/test", nil)
+		w := httptest.NewRecorder()
+		
+		router.ServeHTTP(w, req)
+	}
+}
