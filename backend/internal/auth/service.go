@@ -3,14 +3,11 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Service interface {
@@ -24,56 +21,56 @@ type Service interface {
 	CreateCustomerContact(ctx context.Context, req CreateCustomerContactRequest) (*User, error)
 	CreateEnterpriseUser(ctx context.Context, req CreateEnterpriseUserRequest) (*User, error)
 	UpdateUser(ctx context.Context, userID int, updates UserUpdates) (*User, error)
+	DeactivateUser(ctx context.Context, userID int) error
+	GetUserByID(ctx context.Context, userID int) (*User, error)
+	GetUsersByTenant(ctx context.Context, tenantID string) ([]User, error)
+	GetCustomerContacts(ctx context.Context, customerID int) ([]User, error)
+	
+	// User search and filtering
+	SearchUsers(ctx context.Context, filters UserSearchFilters) ([]User, int, error)
+	GetUserStats(ctx context.Context) (*UserStats, error)
+	
+	// Tenant access management
 	UpdateUserTenantAccess(ctx context.Context, req UpdateUserTenantAccessRequest) error
 	UpdateUserYardAccess(ctx context.Context, req UpdateUserYardAccessRequest) error
-	DeactivateUser(ctx context.Context, userID int) error
 	
-	// Permission checking
+	// Permission checking (missing methods that middleware needs)
 	CheckPermission(ctx context.Context, check UserPermissionCheck) error
 	CheckYardAccess(ctx context.Context, userID int, tenantID, yardLocation string) error
 	GetUserPermissions(ctx context.Context, userID int, tenantID string) ([]Permission, error)
 	
-	// Enterprise operations
+	// Enterprise operations (missing methods that middleware needs)
 	GetEnterpriseContext(ctx context.Context, userID int) (*EnterpriseContext, error)
 	GetCustomerAccessContext(ctx context.Context, userID int) (*CustomerAccessContext, error)
-	
-	// User queries
-	GetUser(ctx context.Context, userID int) (*User, error)
-	GetUsersByTenant(ctx context.Context, tenantID string) ([]User, error)
-	GetCustomerContacts(ctx context.Context, customerID int) ([]User, error)
-	SearchUsers(ctx context.Context, filter UserSearchFilter) ([]User, error)
-	GetUserStats(ctx context.Context) (*UserStats, error)
-	
-	// Session management
-	InvalidateUserSessions(ctx context.Context, userID int) error
-	CleanupExpiredSessions(ctx context.Context) error
 }
 
 type service struct {
-	repo          Repository
-	jwtSecret     []byte
-	tokenExpiry   time.Duration
-	refreshExpiry time.Duration
+	repo           Repository
+	permissionSvc  PermissionService
+	jwtSecret      []byte
+	tokenExpiry    time.Duration
+	calculator     *PermissionCalculator
 }
 
-func NewService(repo Repository, jwtSecret string) Service {
+func NewService(repo Repository, jwtSecret []byte, tokenExpiry time.Duration) Service {
+	permissionSvc := NewPermissionService(repo)
 	return &service{
 		repo:          repo,
-		jwtSecret:     []byte(jwtSecret),
-		tokenExpiry:   24 * time.Hour,
-		refreshExpiry: 7 * 24 * time.Hour,
+		permissionSvc: permissionSvc,
+		jwtSecret:     jwtSecret,
+		tokenExpiry:   tokenExpiry,
+		calculator:    &PermissionCalculator{},
 	}
 }
 
-// Authentication
 func (s *service) Authenticate(ctx context.Context, req LoginRequest) (*LoginResponse, error) {
-	user, err := s.repo.GetUserByUsername(ctx, req.Username)
+	user, err := s.repo.GetUserByEmail(ctx, req.Email)
 	if err != nil {
-		return nil, err
+		return nil, ErrInvalidCredentials
 	}
 	
 	if !user.IsActive {
-		return nil, ErrUserInactive
+		return nil, ErrInvalidCredentials
 	}
 	
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
@@ -86,22 +83,34 @@ func (s *service) Authenticate(ctx context.Context, req LoginRequest) (*LoginRes
 		return nil, err
 	}
 	
-	// Create session
-	session, err := s.createSession(ctx, user.ID, tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create session: %w", err)
-	}
-	
 	// Generate JWT token
-	token, err := s.generateJWT(user, tenantID, session.ID)
+	token, err := s.generateToken(user.ID, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
 	
 	// Generate refresh token
-	refreshToken, err := s.generateRefreshToken()
+	refreshToken, err := s.generateRefreshToken(user.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+	
+	// Create session
+	session := &Session{
+		ID:           s.generateSessionID(),
+		UserID:       user.ID,
+		TenantID:     tenantID,
+		Token:        token,
+		RefreshToken: refreshToken,
+		TenantContext: &tenantContext,
+		IsActive:     true,
+		ExpiresAt:    time.Now().Add(s.tokenExpiry),
+		CreatedAt:    time.Now(),
+		LastUsedAt:   time.Now(),
+	}
+	
+	if err := s.repo.CreateSession(ctx, session); err != nil {
+		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 	
 	// Update last login
@@ -112,7 +121,7 @@ func (s *service) Authenticate(ctx context.Context, req LoginRequest) (*LoginRes
 	return &LoginResponse{
 		Token:         token,
 		User:          user.ToResponse(),
-		TenantContext: tenantContext,
+		TenantContext: &tenantContext,
 		ExpiresAt:     time.Now().Add(s.tokenExpiry),
 		RefreshToken:  refreshToken,
 	}, nil
@@ -130,6 +139,7 @@ func (s *service) determineTenantContext(user *User, requestedTenantID string) (
 			tenantID = user.PrimaryTenantID
 		}
 		
+		// Fixed: Create TenantAccess properly with all required fields
 		tenantContext = TenantAccess{
 			TenantID:    tenantID,
 			Role:        user.Role,
@@ -184,105 +194,91 @@ func (s *service) ValidateToken(ctx context.Context, tokenString string) (*User,
 	}
 	
 	userID := int(claims["user_id"].(float64))
-	tenantID := claims["tenant_id"].(string)
 	sessionID := claims["session_id"].(string)
 	
-	// Validate session is still active
+	// Get session and validate
 	session, err := s.repo.GetSession(ctx, sessionID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("session not found or expired")
+		return nil, nil, ErrInvalidToken
 	}
 	
-	if !session.IsActive {
-		return nil, nil, fmt.Errorf("session is inactive")
+	if !session.IsActive || time.Now().After(session.ExpiresAt) {
+		return nil, nil, ErrInvalidToken
 	}
 	
 	// Get user
 	user, err := s.repo.GetUserByID(ctx, userID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, ErrUserNotFound
 	}
 	
 	if !user.IsActive {
-		return nil, nil, ErrUserInactive
+		return nil, nil, ErrInvalidToken
 	}
 	
-	// Get tenant context
-	_, tenantContext, err := s.determineTenantContext(user, tenantID)
-	if err != nil {
-		return nil, nil, err
-	}
+	// Update session last used
+	session.LastUsedAt = time.Now()
+	s.repo.UpdateSession(ctx, session)
 	
-	return user, &tenantContext, nil
+	return user, session.TenantContext, nil
 }
 
-func (s *service) Logout(ctx context.Context, token string) error {
-	return s.repo.InvalidateSession(ctx, token)
-}
-
-// User management
 func (s *service) CreateCustomerContact(ctx context.Context, req CreateCustomerContactRequest) (*User, error) {
-	// Validate customer exists
-	if err := s.repo.ValidateCustomerExists(ctx, req.CustomerID); err != nil {
-		return nil, err
+	// Check if user exists
+	if existing, _ := s.repo.GetUserByEmail(ctx, req.Email); existing != nil {
+		return nil, ErrUserExists
 	}
 	
-	// Validate yard access
-	if err := s.validateYardAccess(req.YardAccess); err != nil {
-		return nil, err
-	}
-	
+	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
 	
+	// Create tenant access
+	tenantAccess := TenantAccess{
+		TenantID:    req.TenantID,
+		Role:        RoleCustomerContact,
+		Permissions: []Permission{PermissionViewInventory, PermissionCreateWorkOrder},
+		YardAccess:  req.YardAccess,
+		CanRead:     true,
+		CanWrite:    true,
+		CanDelete:   false,
+		CanApprove:  false,
+	}
+	
 	user := &User{
-		Username:        req.Email, // Use email as username for customer contacts
-		Email:           req.Email,
-		FullName:        req.FullName,
-		PasswordHash:    string(hashedPassword),
-		Role:            RoleCustomerContact,
-		AccessLevel:     1, // Basic customer access
+		Username:         req.Email,
+		Email:            req.Email,
+		FullName:         req.FullName,
+		PasswordHash:     string(hashedPassword),
+		Role:             RoleCustomerContact,
+		AccessLevel:      1,
 		IsEnterpriseUser: false,
-		CustomerID:      &req.CustomerID,
-		ContactType:     req.ContactType,
-		PrimaryTenantID: req.TenantID,
-		TenantAccess: TenantAccessList{
-			{
-				TenantID:    req.TenantID,
-				Role:        RoleCustomerContact,
-				Permissions: s.getCustomerContactPermissions(),
-				YardAccess:  req.YardAccess,
-				CanRead:     true,
-				CanWrite:    req.ContactType == ContactPrimary || req.ContactType == ContactApprover,
-				CanDelete:   false,
-				CanApprove:  req.ContactType == ContactApprover,
-			},
-		},
-		IsActive: true,
+		TenantAccess:     []TenantAccess{tenantAccess},
+		PrimaryTenantID:  req.TenantID,
+		CustomerID:       &req.CustomerID,
+		ContactType:      req.ContactType,
+		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
 	}
 	
-	if err := s.repo.CreateUser(ctx, user); err != nil {
-		return nil, err
-	}
-	
-	return user, nil
+	return s.repo.CreateUser(ctx, user)
 }
 
 func (s *service) CreateEnterpriseUser(ctx context.Context, req CreateEnterpriseUserRequest) (*User, error) {
+	// Check if user exists
+	if existing, _ := s.repo.GetUserByEmail(ctx, req.Email); existing != nil {
+		return nil, ErrUserExists
+	}
+	
 	// Validate role
 	if !s.isValidRole(req.Role) {
 		return nil, ErrInvalidUserRole
 	}
 	
-	// Validate tenant access
-	for _, tenantAccess := range req.TenantAccess {
-		if err := s.validateYardAccess(tenantAccess.YardAccess); err != nil {
-			return nil, err
-		}
-	}
-	
+	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, fmt.Errorf("failed to hash password: %w", err)
@@ -296,315 +292,14 @@ func (s *service) CreateEnterpriseUser(ctx context.Context, req CreateEnterprise
 		Role:             req.Role,
 		AccessLevel:      s.getRoleAccessLevel(req.Role),
 		IsEnterpriseUser: req.IsEnterpriseUser,
-		PrimaryTenantID:  req.PrimaryTenantID,
 		TenantAccess:     req.TenantAccess,
+		PrimaryTenantID:  req.PrimaryTenantID,
 		IsActive:         true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
 	}
 	
-	if err := s.repo.CreateUser(ctx, user); err != nil {
-		return nil, err
-	}
-	
-	return user, nil
-}
-
-func (s *service) UpdateUserTenantAccess(ctx context.Context, req UpdateUserTenantAccessRequest) error {
-	// Validate tenant access
-	for _, tenantAccess := range req.TenantAccess {
-		if err := s.validateYardAccess(tenantAccess.YardAccess); err != nil {
-			return err
-		}
-	}
-	
-	return s.repo.UpdateUserTenantAccess(ctx, req.UserID, req.TenantAccess)
-}
-
-func (s *service) UpdateUserYardAccess(ctx context.Context, req UpdateUserYardAccessRequest) error {
-	// Validate yard access
-	if err := s.validateYardAccess(req.YardAccess); err != nil {
-		return err
-	}
-	
-	return s.repo.UpdateUserYardAccess(ctx, req.UserID, req.TenantID, req.YardAccess)
-}
-
-// Permission checking
-func (s *service) CheckPermission(ctx context.Context, check UserPermissionCheck) error {
-	user, err := s.repo.GetUserByID(ctx, check.UserID)
-	if err != nil {
-		return err
-	}
-	
-	if !user.HasPermissionInTenant(check.TenantID, check.Permission) {
-		return ErrPermissionDenied
-	}
-	
-	return nil
-}
-
-func (s *service) CheckYardAccess(ctx context.Context, userID int, tenantID, yardLocation string) error {
-	user, err := s.repo.GetUserByID(ctx, userID)
-	if err != nil {
-		return err
-	}
-	
-	if !user.HasAccessToYard(tenantID, yardLocation) {
-		return ErrYardAccessDenied
-	}
-	
-	return nil
-}
-
-func (s *service) GetUserPermissions(ctx context.Context, userID int, tenantID string) ([]Permission, error) {
-	return s.repo.GetUserPermissions(ctx, userID, tenantID)
-}
-
-// Enterprise operations
-func (s *service) GetEnterpriseContext(ctx context.Context, userID int) (*EnterpriseContext, error) {
-	user, err := s.repo.GetUserByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	
-	if !user.CanPerformCrossTenantOperation() {
-		return nil, ErrEnterpriseAccessDenied
-	}
-	
-	return &EnterpriseContext{
-		UserID:            user.ID,
-		AccessibleTenants: user.TenantAccess,
-		IsEnterpriseAdmin: user.Role == RoleEnterpriseAdmin,
-		CrossTenantPerms:  s.getCrossTenantPermissions(user.Role),
-	}, nil
-}
-
-func (s *service) GetCustomerAccessContext(ctx context.Context, userID int) (*CustomerAccessContext, error) {
-	user, err := s.repo.GetUserByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	
-	if !user.IsCustomerContact() {
-		return nil, ErrNotCustomerContact
-	}
-	
-	return user.GetCustomerAccessContext(), nil
-}
-
-// User queries
-func (s *service) GetUser(ctx context.Context, userID int) (*User, error) {
-	return s.repo.GetUserByID(ctx, userID)
-}
-
-func (s *service) GetUsersByTenant(ctx context.Context, tenantID string) ([]User, error) {
-	return s.repo.GetUsersByTenant(ctx, tenantID)
-}
-
-func (s *service) GetCustomerContacts(ctx context.Context, customerID int) ([]User, error) {
-	return s.repo.GetCustomerContacts(ctx, customerID)
-}
-
-func (s *service) SearchUsers(ctx context.Context, filter UserSearchFilter) ([]User, error) {
-	return s.repo.SearchUsers(ctx, filter)
-}
-
-func (s *service) GetUserStats(ctx context.Context) (*UserStats, error) {
-	return s.repo.GetUserStats(ctx)
-}
-
-// Session management
-func (s *service) InvalidateUserSessions(ctx context.Context, userID int) error {
-	return s.repo.InvalidateUserSessions(ctx, userID)
-}
-
-func (s *service) CleanupExpiredSessions(ctx context.Context) error {
-	return s.repo.CleanupExpiredSessions(ctx)
-}
-
-// Helper methods
-func (s *service) createSession(ctx context.Context, userID int, tenantID string) (*Session, error) {
-	token, err := s.generateSessionToken()
-	if err != nil {
-		return nil, err
-	}
-	
-	session := &Session{
-		ID:        generateSessionID(),
-		UserID:    userID,
-		TenantID:  tenantID,
-		Token:     token,
-		ExpiresAt: time.Now().Add(s.tokenExpiry),
-		IsActive:  true,
-		CreatedAt: time.Now(),
-	}
-	
-	if err := s.repo.CreateSession(ctx, session); err != nil {
-		return nil, err
-	}
-	
-	return session, nil
-}
-
-func (s *service) generateJWT(user *User, tenantID, sessionID string) (string, error) {
-	claims := jwt.MapClaims{
-		"user_id":    user.ID,
-		"username":   user.Username,
-		"role":       user.Role,
-		"tenant_id":  tenantID,
-		"session_id": sessionID,
-		"exp":        time.Now().Add(s.tokenExpiry).Unix(),
-		"iat":        time.Now().Unix(),
-	}
-	
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(s.jwtSecret)
-}
-
-func (s *service) generateSessionToken() (string, error) {
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
-}
-
-func (s *service) generateRefreshToken() (string, error) {
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
-}
-
-func generateSessionID() string {
-	bytes := make([]byte, 16)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
-}
-
-func (s *service) getRoleAccessLevel(role UserRole) int {
-	switch role {
-	case RoleCustomerContact:
-		return 1
-	case RoleOperator:
-		return 2
-	case RoleManager:
-		return 3
-	case RoleAdmin:
-		return 4
-	case RoleEnterpriseAdmin:
-		return 5
-	case RoleSystemAdmin:
-		return 6
-	default:
-		return 1
-	}
-}
-
-func (s *service) isValidRole(role UserRole) bool {
-	validRoles := []UserRole{
-		RoleCustomerContact, RoleOperator, RoleManager,
-		RoleAdmin, RoleEnterpriseAdmin, RoleSystemAdmin,
-	}
-	
-	for _, validRole := range validRoles {
-		if role == validRole {
-			return true
-		}
-	}
-	
-	return false
-}
-
-func (s *service) validateYardAccess(yardAccess []YardAccess) error {
-	// Validate yard locations are not empty and permissions are valid
-	for _, yard := range yardAccess {
-		if yard.YardLocation == "" {
-			return ErrInvalidYardAccess
-		}
-		
-		// At least one permission should be granted
-		if !yard.CanViewWorkOrders && !yard.CanViewInventory && 
-		   !yard.CanCreateWorkOrders && !yard.CanApproveOrders &&
-		   !yard.CanManageTransport && !yard.CanExportData {
-			return ErrInvalidYardAccess
-		}
-	}
-	
-	return nil
-}
-
-func (s *service) getCustomerContactPermissions() []Permission {
-	return []Permission{
-		PermissionWorkOrderRead,
-		PermissionInventoryRead,
-		PermissionCustomerRead,
-	}
-}
-
-func (s *service) getEnterprisePermissions(role UserRole) []Permission {
-	switch role {
-	case RoleEnterpriseAdmin:
-		return []Permission{
-			PermissionCustomerRead, PermissionCustomerWrite,
-			PermissionInventoryRead, PermissionInventoryWrite, PermissionInventoryExport,
-			PermissionWorkOrderRead, PermissionWorkOrderWrite, PermissionWorkOrderApprove,
-			PermissionTransportRead, PermissionTransportWrite,
-			PermissionCrossTenantView, PermissionUserManagement,
-		}
-	case RoleSystemAdmin:
-		return []Permission{
-			PermissionCustomerRead, PermissionCustomerWrite, PermissionCustomerDelete,
-			PermissionInventoryRead, PermissionInventoryWrite, PermissionInventoryDelete, PermissionInventoryExport,
-			PermissionWorkOrderRead, PermissionWorkOrderWrite, PermissionWorkOrderDelete, 
-			PermissionWorkOrderApprove, PermissionWorkOrderInvoice,
-			PermissionTransportRead, PermissionTransportWrite,
-			PermissionCrossTenantView, PermissionUserManagement, PermissionSystemConfig,
-		}
-	case RoleAdmin:
-		return []Permission{
-			PermissionCustomerRead, PermissionCustomerWrite,
-			PermissionInventoryRead, PermissionInventoryWrite, PermissionInventoryExport,
-			PermissionWorkOrderRead, PermissionWorkOrderWrite, PermissionWorkOrderApprove,
-			PermissionTransportRead, PermissionTransportWrite,
-			PermissionUserManagement,
-		}
-	case RoleManager:
-		return []Permission{
-			PermissionCustomerRead, PermissionCustomerWrite,
-			PermissionInventoryRead, PermissionInventoryWrite, PermissionInventoryExport,
-			PermissionWorkOrderRead, PermissionWorkOrderWrite, PermissionWorkOrderApprove,
-			PermissionTransportRead, PermissionTransportWrite,
-		}
-	case RoleOperator:
-		return []Permission{
-			PermissionInventoryRead, PermissionInventoryWrite,
-			PermissionWorkOrderRead, PermissionWorkOrderWrite,
-			PermissionTransportRead,
-		}
-	default:
-		return []Permission{}
-	}
-}
-
-func (s *service) getCrossTenantPermissions(role UserRole) []Permission {
-	if role == RoleEnterpriseAdmin || role == RoleSystemAdmin {
-		return []Permission{
-			PermissionCrossTenantView,
-			PermissionUserManagement,
-		}
-	}
-	return []Permission{}
-}
-
-// Additional user update functionality
-type UserUpdates struct {
-	Email            *string          `json:"email"`
-	FullName         *string          `json:"full_name"`
-	Role             *UserRole        `json:"role"`
-	IsActive         *bool            `json:"is_active"`
-	IsEnterpriseUser *bool            `json:"is_enterprise_user"`
-	PrimaryTenantID  *string          `json:"primary_tenant_id"`
+	return s.repo.CreateUser(ctx, user)
 }
 
 func (s *service) UpdateUser(ctx context.Context, userID int, updates UserUpdates) (*User, error) {
@@ -637,6 +332,21 @@ func (s *service) UpdateUser(ctx context.Context, userID int, updates UserUpdate
 		user.PrimaryTenantID = *updates.PrimaryTenantID
 	}
 	
+	// Handle password change
+	if updates.CurrentPassword != nil && updates.NewPassword != nil {
+		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(*updates.CurrentPassword)); err != nil {
+			return nil, ErrInvalidCredentials
+		}
+		
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(*updates.NewPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash new password: %w", err)
+		}
+		user.PasswordHash = string(hashedPassword)
+	}
+	
+	user.UpdatedAt = time.Now()
+	
 	if err := s.repo.UpdateUser(ctx, user); err != nil {
 		return nil, err
 	}
@@ -651,6 +361,7 @@ func (s *service) DeactivateUser(ctx context.Context, userID int) error {
 	}
 	
 	user.IsActive = false
+	user.UpdatedAt = time.Now()
 	
 	// Invalidate all user sessions
 	if err := s.repo.InvalidateUserSessions(ctx, userID); err != nil {
@@ -660,8 +371,216 @@ func (s *service) DeactivateUser(ctx context.Context, userID int) error {
 	return s.repo.UpdateUser(ctx, user)
 }
 
+func (s *service) GetUserByID(ctx context.Context, userID int) (*User, error) {
+	return s.repo.GetUserByID(ctx, userID)
+}
+
+func (s *service) GetUsersByTenant(ctx context.Context, tenantID string) ([]User, error) {
+	return s.repo.GetUsersByTenant(ctx, tenantID)
+}
+
+func (s *service) GetCustomerContacts(ctx context.Context, customerID int) ([]User, error) {
+	return s.repo.GetCustomerContacts(ctx, customerID)
+}
+
+func (s *service) SearchUsers(ctx context.Context, filters UserSearchFilters) ([]User, int, error) {
+	return s.repo.SearchUsers(ctx, filters)
+}
+
+func (s *service) GetUserStats(ctx context.Context) (*UserStats, error) {
+	return s.repo.GetUserStats(ctx)
+}
+
+func (s *service) UpdateUserTenantAccess(ctx context.Context, req UpdateUserTenantAccessRequest) error {
+	user, err := s.repo.GetUserByID(ctx, req.UserID)
+	if err != nil {
+		return err
+	}
+	
+	user.TenantAccess = req.TenantAccess
+	user.UpdatedAt = time.Now()
+	
+	return s.repo.UpdateUser(ctx, user)
+}
+
+func (s *service) UpdateUserYardAccess(ctx context.Context, req UpdateUserYardAccessRequest) error {
+	user, err := s.repo.GetUserByID(ctx, req.UserID)
+	if err != nil {
+		return err
+	}
+	
+	// Find and update the tenant access
+	for i, access := range user.TenantAccess {
+		if access.TenantID == req.TenantID {
+			user.TenantAccess[i].YardAccess = req.YardAccess
+			break
+		}
+	}
+	
+	user.UpdatedAt = time.Now()
+	return s.repo.UpdateUser(ctx, user)
+}
+
 func (s *service) RefreshToken(ctx context.Context, refreshToken string) (*LoginResponse, error) {
 	// In a production system, you'd store and validate refresh tokens
 	// For now, this is a placeholder implementation
 	return nil, fmt.Errorf("refresh token functionality not implemented")
+}
+
+func (s *service) Logout(ctx context.Context, token string) error {
+	// Parse token to get session ID
+	claims := jwt.MapClaims{}
+	_, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
+		return s.jwtSecret, nil
+	})
+	
+	if err != nil {
+		return ErrInvalidToken
+	}
+	
+	sessionID, ok := claims["session_id"].(string)
+	if !ok {
+		return ErrInvalidToken
+	}
+	
+	return s.repo.InvalidateSession(ctx, sessionID)
+}
+
+// Helper methods
+
+func (s *service) generateToken(userID int, tenantID string) (string, error) {
+	claims := jwt.MapClaims{
+		"user_id":    userID,
+		"tenant_id":  tenantID,
+		"session_id": s.generateSessionID(),
+		"exp":        time.Now().Add(s.tokenExpiry).Unix(),
+		"iat":        time.Now().Unix(),
+	}
+	
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(s.jwtSecret)
+}
+
+func (s *service) generateRefreshToken(userID int) (string, error) {
+	claims := jwt.MapClaims{
+		"user_id": userID,
+		"exp":     time.Now().Add(24 * time.Hour * 7).Unix(), // 7 days
+		"iat":     time.Now().Unix(),
+		"type":    "refresh",
+	}
+	
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(s.jwtSecret)
+}
+
+func (s *service) generateSessionID() string {
+	return fmt.Sprintf("sess_%d_%d", time.Now().UnixNano(), time.Now().Unix())
+}
+
+func (s *service) isValidRole(role UserRole) bool {
+	validRoles := []UserRole{
+		RoleCustomerContact,
+		RoleOperator,
+		RoleManager,
+		RoleAdmin,
+		RoleEnterpriseAdmin,
+		RoleSystemAdmin,
+	}
+	
+	for _, validRole := range validRoles {
+		if role == validRole {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *service) getRoleAccessLevel(role UserRole) int {
+	switch role {
+	case RoleCustomerContact:
+		return 1
+	case RoleOperator:
+		return 2
+	case RoleManager:
+		return 3
+	case RoleAdmin:
+		return 4
+	case RoleEnterpriseAdmin:
+		return 5
+	case RoleSystemAdmin:
+		return 6
+	default:
+		return 1
+	}
+}
+
+func (s *service) getEnterprisePermissions(role UserRole) []Permission {
+	basePermissions := []Permission{
+		PermissionViewInventory,
+		PermissionCreateWorkOrder,
+		PermissionManageTransport,
+		PermissionExportData,
+	}
+	
+	switch role {
+	case RoleEnterpriseAdmin, RoleSystemAdmin:
+		return append(basePermissions, 
+			PermissionApproveWorkOrder,
+			PermissionUserManagement,
+			PermissionCrossTenantView,
+		)
+	case RoleAdmin, RoleManager:
+		return append(basePermissions, PermissionApproveWorkOrder)
+	default:
+		return basePermissions
+	}
+}
+
+func (s *service) getCrossTenantPermissions(role UserRole) []Permission {
+	return s.calculator.GetCrossTenantPermissions(role)
+}
+
+// Missing method implementations that middleware needs
+
+func (s *service) CheckPermission(ctx context.Context, check UserPermissionCheck) error {
+	return s.permissionSvc.CheckPermission(ctx, check.UserID, check.TenantID, check.Permission)
+}
+
+func (s *service) CheckYardAccess(ctx context.Context, userID int, tenantID, yardLocation string) error {
+	return s.permissionSvc.CheckYardAccess(ctx, userID, tenantID, yardLocation)
+}
+
+func (s *service) GetUserPermissions(ctx context.Context, userID int, tenantID string) ([]Permission, error) {
+	return s.permissionSvc.GetUserPermissions(ctx, userID, tenantID)
+}
+
+func (s *service) GetEnterpriseContext(ctx context.Context, userID int) (*EnterpriseContext, error) {
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	
+	if !user.CanPerformCrossTenantOperation() {
+		return nil, ErrEnterpriseAccessDenied
+	}
+	
+	return &EnterpriseContext{
+		UserID:            user.ID,
+		AccessibleTenants: user.TenantAccess,
+		IsEnterpriseAdmin: user.Role == RoleEnterpriseAdmin || user.Role == RoleSystemAdmin,
+		CrossTenantPerms:  s.getCrossTenantPermissions(user.Role),
+	}, nil
+}
+
+func (s *service) GetCustomerAccessContext(ctx context.Context, userID int) (*CustomerAccessContext, error) {
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	
+	if !user.IsCustomerContact() {
+		return nil, ErrNotCustomerContact
+	}
+	
+	return user.GetCustomerAccessContext(), nil
 }

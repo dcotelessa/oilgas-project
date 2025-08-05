@@ -64,6 +64,10 @@ type TenantAccess struct {
 	Role             UserRole          `json:"role"`
 	Permissions      []Permission      `json:"permissions"`
 	YardAccess       []YardAccess      `json:"yard_access"`
+	CanRead          bool              `json:"can_read"`
+	CanWrite         bool              `json:"can_write"`
+	CanDelete        bool              `json:"can_delete"`
+	CanApprove       bool              `json:"can_approve"`
 }
 
 // YardAccess defines granular yard-level permissions
@@ -80,12 +84,12 @@ type YardAccess struct {
 // TenantAccessList for database storage
 type TenantAccessList []TenantAccess
 
-// Value implements driver.Valuer for database storage
+// Implement driver.Valuer for database storage
 func (tal TenantAccessList) Value() (driver.Value, error) {
 	return json.Marshal(tal)
 }
 
-// Scan implements sql.Scanner for database retrieval
+// Implement sql.Scanner for database retrieval
 func (tal *TenantAccessList) Scan(value interface{}) error {
 	if value == nil {
 		*tal = TenantAccessList{}
@@ -100,20 +104,35 @@ func (tal *TenantAccessList) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, tal)
 }
 
-// Session represents active user sessions
+// Session represents active user sessions with proper fields
 type Session struct {
-	ID                string    `json:"id" db:"id"`
-	UserID            int       `json:"user_id" db:"user_id"`
-	Token             string    `json:"-" db:"token"`
-	RefreshToken      string    `json:"-" db:"refresh_token"`
-	TenantContext     *TenantAccess `json:"tenant_context" db:"tenant_context"`
-	ExpiresAt         time.Time `json:"expires_at" db:"expires_at"`
-	RefreshExpiresAt  *time.Time `json:"refresh_expires_at" db:"refresh_expires_at"`
-	CreatedAt         time.Time `json:"created_at" db:"created_at"`
-	LastUsedAt        time.Time `json:"last_used_at" db:"last_used_at"`
-	UserAgent         string    `json:"user_agent" db:"user_agent"`
-	IPAddress         string    `json:"ip_address" db:"ip_address"`
+	ID                string           `json:"id" db:"id"`
+	UserID            int              `json:"user_id" db:"user_id"`
+	TenantID          string           `json:"tenant_id" db:"tenant_id"`         // Added missing field
+	Token             string           `json:"-" db:"token"`
+	RefreshToken      string           `json:"-" db:"refresh_token"`
+	TenantContext     *TenantAccess    `json:"tenant_context" db:"tenant_context"`
+	IsActive          bool             `json:"is_active" db:"is_active"`         // Added missing field
+	ExpiresAt         time.Time        `json:"expires_at" db:"expires_at"`
+	RefreshExpiresAt  *time.Time       `json:"refresh_expires_at" db:"refresh_expires_at"`
+	CreatedAt         time.Time        `json:"created_at" db:"created_at"`
+	LastUsedAt        time.Time        `json:"last_used_at" db:"last_used_at"`
+	UserAgent         string           `json:"user_agent" db:"user_agent"`
+	IPAddress         string           `json:"ip_address" db:"ip_address"`
 }
+
+// Permission represents system permissions
+type Permission string
+
+const (
+	PermissionViewInventory     Permission = "VIEW_INVENTORY"
+	PermissionCreateWorkOrder   Permission = "CREATE_WORK_ORDER"
+	PermissionApproveWorkOrder  Permission = "APPROVE_WORK_ORDER"
+	PermissionManageTransport   Permission = "MANAGE_TRANSPORT"
+	PermissionExportData       Permission = "EXPORT_DATA"
+	PermissionUserManagement   Permission = "USER_MANAGEMENT"
+	PermissionCrossTenantView  Permission = "CROSS_TENANT_VIEW"
+)
 
 // UserResponse for API responses (excludes sensitive fields)
 type UserResponse struct {
@@ -153,13 +172,20 @@ func (u *User) ToResponse() UserResponse {
 	}
 }
 
-// User permission check for middleware
-type UserPermissionCheck struct {
-	UserID       int        `json:"user_id"`
-	TenantID     string     `json:"tenant_id"`
-	YardLocation *string    `json:"yard_location,omitempty"`
-	Permission   Permission `json:"permission"`
-	ResourceID   *string    `json:"resource_id,omitempty"`
+// LoginRequest for authentication
+type LoginRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
+	TenantID string `json:"tenant_id,omitempty"`
+}
+
+// LoginResponse for authentication
+type LoginResponse struct {
+	Token         string          `json:"token"`
+	User          UserResponse    `json:"user"`
+	TenantContext *TenantAccess   `json:"tenant_context"`
+	ExpiresAt     time.Time       `json:"expires_at"`
+	RefreshToken  string          `json:"refresh_token"`
 }
 
 // Enterprise context for cross-tenant operations
@@ -210,13 +236,59 @@ type UpdateUserYardAccessRequest struct {
 	YardAccess   []YardAccess `json:"yard_access" binding:"required"`
 }
 
+// UserUpdates for updating user information (moved from service.go to avoid duplicate)
 type UserUpdates struct {
-	FullName        *string    `json:"full_name,omitempty"`
-	Email           *string    `json:"email,omitempty"`
-	Role            *UserRole  `json:"role,omitempty"`
-	IsActive        *bool      `json:"is_active,omitempty"`
-	CurrentPassword *string    `json:"current_password,omitempty"`
-	NewPassword     *string    `json:"new_password,omitempty"`
+	FullName         *string    `json:"full_name,omitempty"`
+	Email            *string    `json:"email,omitempty"`
+	Role             *UserRole  `json:"role,omitempty"`
+	IsActive         *bool      `json:"is_active,omitempty"`
+	IsEnterpriseUser *bool      `json:"is_enterprise_user,omitempty"`
+	PrimaryTenantID  *string    `json:"primary_tenant_id,omitempty"`
+	CurrentPassword  *string    `json:"current_password,omitempty"`
+	NewPassword      *string    `json:"new_password,omitempty"`
+}
+
+// UserSearchFilters for search functionality (fix singular/plural issue)
+type UserSearchFilters struct {
+	Query                string     `json:"query"`
+	TenantID            string     `json:"tenant_id"`
+	Role                UserRole   `json:"role"`
+	CustomerID          *int       `json:"customer_id"`
+	OnlyCustomerContacts bool       `json:"only_customer_contacts"`
+	AccessibleTenants   []string   `json:"accessible_tenants"`
+	Limit               int        `json:"limit"`
+	Offset              int        `json:"offset"`
+}
+
+// AdminUserFilters for admin user management
+type AdminUserFilters struct {
+	TenantID          string   `json:"tenant_id"`
+	Role              UserRole `json:"role"`
+	AccessibleTenants []string `json:"accessible_tenants"`
+	Limit             int      `json:"limit"`
+	Offset            int      `json:"offset"`
+}
+
+// UserStatsRequest for user statistics (no parameters needed)
+type UserStatsRequest struct {
+	// Empty struct - stats calculated for current user's accessible tenants
+}
+
+// UserStats response
+type UserStats struct {
+	TotalUsers       int `json:"total_users"`
+	ActiveUsers      int `json:"active_users"`
+	CustomerContacts int `json:"customer_contacts"`
+	EnterpriseUsers  int `json:"enterprise_users"`
+}
+
+// User permission check for middleware
+type UserPermissionCheck struct {
+	UserID       int        `json:"user_id"`
+	TenantID     string     `json:"tenant_id"`
+	YardLocation *string    `json:"yard_location,omitempty"`
+	Permission   Permission `json:"permission"`
+	ResourceID   *string    `json:"resource_id,omitempty"`
 }
 
 // Helper methods for User model
@@ -258,4 +330,47 @@ func (u *User) HasAccessToYard(tenantID, yardLocation string) bool {
 	}
 	
 	return false
+}
+
+// HasPermissionInTenant checks if user has a specific permission in a tenant
+func (u *User) HasPermissionInTenant(tenantID string, permission Permission) bool {
+	// Enterprise users have all permissions
+	if u.IsEnterpriseUser && (u.Role == RoleEnterpriseAdmin || u.Role == RoleSystemAdmin) {
+		return true
+	}
+	
+	// Check tenant-specific permissions
+	for _, access := range u.TenantAccess {
+		if access.TenantID == tenantID {
+			for _, p := range access.Permissions {
+				if p == permission {
+					return true
+				}
+			}
+		}
+	}
+	
+	return false
+}
+
+// GetCustomerAccessContext returns customer access context for customer contacts
+func (u *User) GetCustomerAccessContext() *CustomerAccessContext {
+	if !u.IsCustomerContact() {
+		return nil
+	}
+	
+	// Build yard access from all tenant access
+	allYards := []YardAccess{}
+	tenantMap := make(map[string]TenantAccess)
+	
+	for _, access := range u.TenantAccess {
+		allYards = append(allYards, access.YardAccess...)
+		tenantMap[access.TenantID] = access
+	}
+	
+	return &CustomerAccessContext{
+		CustomerID:      *u.CustomerID,
+		AccessibleYards: allYards,
+		TenantAccess:    tenantMap,
+	}
 }

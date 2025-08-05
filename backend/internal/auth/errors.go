@@ -3,25 +3,29 @@ package auth
 
 import "errors"
 
-// Authentication and authorization errors
+// Authentication errors
 var (
-	ErrInvalidCredentials   = errors.New("invalid credentials")
-	ErrUserNotFound        = errors.New("user not found")
-	ErrUserAlreadyExists   = errors.New("user already exists")
-	ErrUserInactive        = errors.New("user account is inactive")
-	ErrTokenExpired        = errors.New("token has expired")
-	ErrTokenInvalid        = errors.New("token is invalid")
-	ErrSessionNotFound     = errors.New("session not found")
-	ErrSessionExpired      = errors.New("session has expired")
-	ErrPermissionDenied    = errors.New("permission denied")
-	ErrYardAccessDenied    = errors.New("yard access denied")
-	ErrTenantAccessDenied  = errors.New("tenant access denied")
-	ErrEnterpriseAccessDenied = errors.New("enterprise access denied")
-	ErrInvalidTenant       = errors.New("invalid tenant")
-	ErrCustomerNotFound    = errors.New("customer not found")
-	ErrInvalidRole         = errors.New("invalid role")
-	ErrInvalidPassword     = errors.New("invalid password")
-	ErrPasswordTooWeak     = errors.New("password is too weak")
-	ErrEmailInvalid        = errors.New("email address is invalid")
-	ErrUsernameInvalid     = errors.New("username is invalid")
+	ErrInvalidCredentials  = errors.New("invalid credentials")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrUserExists         = errors.New("user already exists")
+	ErrInvalidToken       = errors.New("invalid token")
+	ErrTokenExpired       = errors.New("token has expired")
+	ErrUserInactive       = errors.New("user account is inactive")
+)
+
+// Authorization errors  
+var (
+	ErrPermissionDenied      = errors.New("permission denied")
+	ErrTenantAccessDenied    = errors.New("tenant access denied")
+	ErrYardAccessDenied      = errors.New("yard access denied")
+	ErrEnterpriseAccessDenied = errors.New("enterprise access required")
+	ErrNotCustomerContact    = errors.New("user is not a customer contact")
+)
+
+// Validation errors
+var (
+	ErrInvalidTenant      = errors.New("invalid tenant")
+	ErrInvalidUserRole    = errors.New("invalid user role")
+	ErrWeakPassword       = errors.New("password does not meet requirements")
+	ErrCustomerNotFound   = errors.New("customer not found")
 )
