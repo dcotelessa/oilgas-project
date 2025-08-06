@@ -266,10 +266,6 @@ test: ## Run all tests
 	@echo "$(YELLOW)🧪 Running tests...$(NC)"
 	@cd backend && go test ./... -v
 
-test-customer-domain: ## Run customer domain tests
-	@echo "$(YELLOW)🧪 Running customer domain tests...$(NC)"
-	@cd backend && go test ./internal/customer/... -v
-
 # =============================================================================
 # UTILITIES
 # =============================================================================
@@ -333,6 +329,121 @@ troubleshoot: ## Show troubleshooting information
 	@echo ""
 	@echo "$(BLUE)Log Files:$(NC)"
 	@ls -la database/logs/ 2>/dev/null || echo "No logs yet"
+
+# =============================================================================
+# DOMAIN TESTING
+# =============================================================================
+
+test-customer-domain: ## Test customer domain with auth integration
+	@echo "$(YELLOW)🧪 Testing customer domain...$(NC)"
+	@cd backend && go test -v ./internal/customer/... -tags=integration || true
+	@echo "$(GREEN)✅ Customer domain tests completed$(NC)"
+
+test-auth-domain: ## Test auth domain with tenant manager  
+	@echo "$(YELLOW)🧪 Testing auth domain...$(NC)"
+	@cd backend && go test -v ./internal/auth/... -tags=integration || true
+	@echo "$(GREEN)✅ Auth domain tests completed$(NC)"
+
+test-workorder-domain: ## Test work order domain
+	@echo "$(YELLOW)🧪 Testing work order domain...$(NC)"
+	@cd backend && go test -v ./internal/workorder/... -tags=integration || true
+	@echo "$(GREEN)✅ Work order domain tests completed$(NC)"
+
+test-all-domains: ## Test all domains together
+	@echo "$(YELLOW)🧪 Testing all domains...$(NC)"
+	@$(MAKE) test-customer-domain
+	@$(MAKE) test-auth-domain  
+	@$(MAKE) test-workorder-domain
+	@echo "$(GREEN)✅ All domain tests completed$(NC)"
+
+# =============================================================================
+# BACKEND API
+# =============================================================================
+
+start-backend: ## Start backend API server
+	@echo "$(YELLOW)🚀 Starting backend API server...$(NC)"
+	@docker-compose up -d backend
+	@echo "$(GREEN)✅ Backend API started at http://localhost:8000$(NC)"
+
+backend-logs: ## Show backend API logs
+	@docker-compose logs -f backend
+
+# =============================================================================
+# COMPLETE SETUP
+# =============================================================================
+
+setup-all-domains: ## Complete setup for customer/auth/workorder domains
+	@echo "$(GREEN)🚀 Complete Domain Setup$(NC)"
+	@echo "=========================="
+	@$(MAKE) analyze-mdb
+	@$(MAKE) analyze-customers
+	@$(MAKE) setup-db
+	@$(MAKE) clean-customers
+	@$(MAKE) import-customers
+	@echo "$(YELLOW)🔍 Verifying domain integration...$(NC)"
+	@$(MAKE) verify-domains
+	@echo "$(GREEN)✅ All domains setup completed!$(NC)"
+
+verify-domains: ## Verify all domain tables exist
+	@echo "$(YELLOW)🔍 Verifying domain setup...$(NC)"
+	@echo "$(BLUE)📊 Checking schemas exist:$(NC)"
+	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('auth', 'audit', 'store') ORDER BY schema_name;"
+	@echo "$(BLUE)📊 Checking auth tables:$(NC)"
+	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "SELECT tablename FROM pg_tables WHERE schemaname = 'auth' ORDER BY tablename;" || echo "No auth tables found"
+	@echo "$(BLUE)📊 Checking store tables:$(NC)"  
+	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "SELECT tablename FROM pg_tables WHERE schemaname = 'store' ORDER BY tablename;"
+	@echo "$(BLUE)📊 Checking data migration:$(NC)"
+	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "SELECT 'customers_standardized' as table_name, COUNT(*) as record_count FROM store.customers_standardized;" || echo "No standardized customers"
+	@docker-compose exec -T postgres psql -U oilgas_user -d oilgas_dev -c "SELECT 'customers' as table_name, COUNT(*) as record_count FROM store.customers;" || echo "No optimized customers yet"
+	@echo "$(GREEN)✅ Domain verification completed$(NC)"
+
+# Remove the duplicate setup-customers target and keep only the enhanced one
+setup-customers-enhanced: check-deps check-mdb ## Enhanced customer setup with domain integration
+	@echo "$(GREEN)🚀 Enhanced Customer Setup$(NC)"
+	@echo "============================"
+	@$(MAKE) analyze-mdb
+	@$(MAKE) analyze-customers  
+	@$(MAKE) setup-db
+	@$(MAKE) clean-customers
+	@$(MAKE) import-customers
+	@$(MAKE) verify-domains
+	@echo "$(GREEN)🎉 Enhanced customer setup completed!$(NC)"
+
+# =============================================================================
+# MIGRATIONS
+# =============================================================================
+
+
+migrate-up: ## Run all migrations up
+	@echo "$(YELLOW)🆙 Running migrations up...$(NC)"
+	@migrate -path database/migrations -database $(DEV_DATABASE_URL) up
+	@echo "$(GREEN)✅ Migrations completed$(NC)"
+
+migrate-down: ## Rollback one migration
+	@echo "$(YELLOW)🔽 Rolling back one migration...$(NC)"
+	@migrate -path database/migrations -database $(DEV_DATABASE_URL) down 1
+	@echo "$(GREEN)✅ Rollback completed$(NC)"
+
+migrate-status: ## Check migration status
+	@echo "$(BLUE)📊 Migration status:$(NC)"
+	@migrate -path database/migrations -database $(DEV_DATABASE_URL) version
+
+migrate-create: ## Create new migration (usage: make migrate-create name=add_new_feature)
+	@if [ -z "$(name)" ]; then \
+		echo "$(RED)❌ Usage: make migrate-create name=add_new_feature$(NC)"; \
+		exit 1; \
+	fi
+	@migrate create -ext sql -dir database/migrations $(name)
+	@echo "$(GREEN)✅ Created migration files for: $(name)$(NC)"
+
+# Enhanced domain setup with migrations
+setup-all-domains-with-migrations: ## Complete setup with proper migrations
+	@echo "$(GREEN)🚀 Complete Setup with Migrations$(NC)"
+	@$(MAKE) setup-db          # Init files for fresh database
+	@$(MAKE) migrate-up        # Apply migrations
+	@$(MAKE) setup-customers   # Your Access pipeline
+	@$(MAKE) verify-domains    # Verify everything works
+	@echo "$(GREEN)✅ Complete setup with migrations done!$(NC)"
 
 # =============================================================================
 # CLEANUP

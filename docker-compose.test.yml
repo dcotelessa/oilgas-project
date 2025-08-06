@@ -1,0 +1,27 @@
+services:
+  auth-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: auth_central
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+    ports:
+      - "5432:5432"
+      
+  tenant-longbeach-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: location_longbeach
+      POSTGRES_USER: testuser  
+      POSTGRES_PASSWORD: testpass
+    ports:
+      - "5433:5432"
+      
+  tenant-bakersfield-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: location_bakersfield
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+    ports:
+      - "5434:5432"
