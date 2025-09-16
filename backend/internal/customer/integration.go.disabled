@@ -5,17 +5,20 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
+
+	"oilgas-backend/internal/auth"
 )
 
 // IntegrationService handles cross-domain operations
 type IntegrationService struct {
 	customerSvc Service
-	authSvc     AuthService
+	authSvc     auth.Service
 	db          *sql.DB
 }
 
-func NewIntegrationService(customerSvc Service, authSvc AuthService, db *sql.DB) *IntegrationService {
+func NewIntegrationService(customerSvc Service, authSvc auth.Service, db *sql.DB) *IntegrationService {
 	return &IntegrationService{
 		customerSvc: customerSvc,
 		authSvc:     authSvc,
@@ -31,12 +34,7 @@ type CustomerOnboardingRequest struct {
 	WorkOrderAccess bool                `json:"work_order_access"`
 }
 
-type ContactInfo struct {
-	Email     string `json:"email"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	Role      string `json:"role"`
-}
+// ContactInfo is defined in models.go
 
 // OnboardCustomer creates customer and all related entities in a transaction
 func (i *IntegrationService) OnboardCustomer(ctx context.Context, tenantID string, req *CustomerOnboardingRequest) (*Customer, error) {

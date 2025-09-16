@@ -1,0 +1,11 @@
+{
+  "name": "Test Oil Company",
+  "company_code": "TOC001", 
+  "tax_id": "12-3456789",
+  "payment_terms": "NET30",
+  "billing_street": "123 Test Street",
+  "billing_city": "Long Beach",
+  "billing_state": "CA", 
+  "billing_zip": "90802",
+  "billing_country": "US"
+}

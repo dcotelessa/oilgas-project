@@ -2,7 +2,6 @@
 package customer
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"

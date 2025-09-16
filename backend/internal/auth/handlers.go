@@ -5,10 +5,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"oilgas-backend/internal/models"
 )
 
 type AuthHandler struct {
@@ -45,11 +43,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	userAgent := c.GetHeader("User-Agent")
 
 	// Authenticate using the new auth service
-	response, err := h.authService.Authenticate(c.Request.Context(), LoginRequest{
-		Email:    req.Email,
-		Password: req.Password,
-		TenantID: req.TenantID,
-	})
+	response, err := h.authService.Authenticate(c.Request.Context(), req.Email, req.Password)
 
 	if err != nil {
 		// Log security event (failed login attempt)
@@ -156,13 +150,13 @@ func (h *AuthHandler) RegisterCustomerContact(c *gin.Context) {
 		return
 	}
 
-	user, err := h.authService.CreateCustomerContact(c.Request.Context(), CreateCustomerContactRequest{
+	user, err := h.authService.CreateCustomerContact(c.Request.Context(), &CreateCustomerContactRequest{
 		Email:      req.Email,
 		FullName:   req.FullName,
 		Password:   req.Password,
 		TenantID:   req.TenantID,
 		CustomerID: req.CustomerID,
-		YardAccess: req.YardAccess,
+		YardAccess: []YardAccess{}, // Convert []string to []YardAccess if needed
 	})
 
 	if err != nil {

@@ -4,11 +4,9 @@ package auth
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -18,6 +16,7 @@ import (
 
 type Service interface {
 	Authenticate(ctx context.Context, email, password string) (*LoginResponse, error)
+	Logout(ctx context.Context, tokenString string) error
 	ValidateToken(ctx context.Context, tokenString string) (*User, *Session, error)
 	CreateCustomerContact(ctx context.Context, req *CreateCustomerContactRequest) (*User, error)
 	CreateEnterpriseUser(ctx context.Context, req *CreateEnterpriseUserRequest) (*User, error)
@@ -154,6 +153,33 @@ func (s *service) Authenticate(ctx context.Context, email, password string) (*Lo
 		ExpiresAt:     session.ExpiresAt,
 		RefreshToken:  session.RefreshToken,
 	}, nil
+}
+
+func (s *service) Logout(ctx context.Context, tokenString string) error {
+	// Parse token to get session ID
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return s.jwtSecret, nil
+	})
+	
+	if err != nil {
+		return fmt.Errorf("invalid token: %w", err)
+	}
+	
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return fmt.Errorf("invalid token claims")
+	}
+	
+	sessionID, ok := claims["session_id"].(string)
+	if !ok {
+		return fmt.Errorf("missing session ID in token")
+	}
+	
+	// Invalidate the session
+	return s.InvalidateSession(ctx, sessionID)
 }
 
 func (s *service) ValidateToken(ctx context.Context, tokenString string) (*User, *Session, error) {

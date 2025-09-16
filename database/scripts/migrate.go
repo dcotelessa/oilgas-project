@@ -32,7 +32,7 @@ type MigrationStatus struct {
 func main() {
 	if len(os.Args) < 3 {
 		fmt.Println("Usage: migrate <database> <direction> [options]")
-		fmt.Println("  database: auth|longbeach|all")
+		fmt.Println("  database: auth|longbeach|bakersfield|colorado|all")
 		fmt.Println("  direction: up|down|status")
 		fmt.Println("  options: --steps=N (for rollback)")
 		fmt.Println("")
@@ -58,8 +58,12 @@ func main() {
 		dbURL = os.Getenv("CENTRAL_AUTH_DB_URL")
 	case "longbeach":
 		dbURL = os.Getenv("LONGBEACH_DB_URL")
+	case "bakersfield":
+		dbURL = os.Getenv("BAKERSFIELD_DB_URL")
+	case "colorado":
+		dbURL = os.Getenv("COLORADO_DB_URL")
 	default:
-		log.Fatal("Invalid database. Use: auth|longbeach")
+		log.Fatal("Invalid database. Use: auth|longbeach|bakersfield|colorado")
 	}
 	
 	if dbURL == "" {
@@ -377,7 +381,7 @@ func parseIntOrDefault(str string, def int) int {
 }
 
 func handleAllDatabases(direction string) {
-	databases := []string{"auth", "longbeach"}
+	databases := []string{"auth", "longbeach", "bakersfield", "colorado"}
 	
 	for _, database := range databases {
 		fmt.Printf("\n=== Processing database: %s ===\n", database)
@@ -388,6 +392,10 @@ func handleAllDatabases(direction string) {
 			dbURL = os.Getenv("CENTRAL_AUTH_DB_URL")
 		case "longbeach":
 			dbURL = os.Getenv("LONGBEACH_DB_URL")
+		case "bakersfield":
+			dbURL = os.Getenv("BAKERSFIELD_DB_URL")
+		case "colorado":
+			dbURL = os.Getenv("COLORADO_DB_URL")
 		}
 		
 		if dbURL == "" {

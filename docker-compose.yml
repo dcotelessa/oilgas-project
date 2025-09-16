@@ -44,6 +44,50 @@ services:
       timeout: 5s
       retries: 5
 
+  # Bakersfield Tenant Database
+  bakersfield-db:
+    image: postgres:15
+    container_name: location_bakersfield_db
+    environment:
+      POSTGRES_DB: location_bakersfield
+      POSTGRES_USER: ${BAKERSFIELD_DB_USER:-bakersfield_user}
+      POSTGRES_PASSWORD: ${BAKERSFIELD_DB_PASSWORD:-bakersfield_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
+    ports:
+      - "${BAKERSFIELD_DB_PORT:-5434}:5432"
+    volumes:
+      - bakersfield_db_data:/var/lib/postgresql/data
+      - ./database/init/bakersfield:/docker-entrypoint-initdb.d
+    networks:
+      - oil_gas_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${BAKERSFIELD_DB_USER:-bakersfield_user} -d location_bakersfield"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Colorado Tenant Database
+  colorado-db:
+    image: postgres:15
+    container_name: location_colorado_db
+    environment:
+      POSTGRES_DB: location_colorado
+      POSTGRES_USER: ${COLORADO_DB_USER:-colorado_user}
+      POSTGRES_PASSWORD: ${COLORADO_DB_PASSWORD:-colorado_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
+    ports:
+      - "${COLORADO_DB_PORT:-5435}:5432"
+    volumes:
+      - colorado_db_data:/var/lib/postgresql/data
+      - ./database/init/colorado:/docker-entrypoint-initdb.d
+    networks:
+      - oil_gas_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${COLORADO_DB_USER:-colorado_user} -d location_colorado"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Your application service
   app:
     build: 
@@ -57,6 +101,12 @@ services:
       # Long Beach Database
       LONGBEACH_DB_URL: postgresql://${LONGBEACH_DB_USER:-longbeach_user}:${LONGBEACH_DB_PASSWORD:-longbeach_password}@longbeach-db:5432/location_longbeach?sslmode=disable
       
+      # Bakersfield Database
+      BAKERSFIELD_DB_URL: postgresql://${BAKERSFIELD_DB_USER:-bakersfield_user}:${BAKERSFIELD_DB_PASSWORD:-bakersfield_password}@bakersfield-db:5432/location_bakersfield?sslmode=disable
+      
+      # Colorado Database
+      COLORADO_DB_URL: postgresql://${COLORADO_DB_USER:-colorado_user}:${COLORADO_DB_PASSWORD:-colorado_password}@colorado-db:5432/location_colorado?sslmode=disable
+      
       # Application config
       GIN_MODE: ${GIN_MODE:-debug}
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -67,6 +117,10 @@ services:
       auth-db:
         condition: service_healthy
       longbeach-db:
+        condition: service_healthy
+      bakersfield-db:
+        condition: service_healthy
+      colorado-db:
         condition: service_healthy
     networks:
       - oil_gas_network
@@ -87,11 +141,17 @@ services:
     depends_on:
       - auth-db
       - longbeach-db
+      - bakersfield-db
+      - colorado-db
 
 volumes:
   auth_db_data:
     driver: local
   longbeach_db_data:
+    driver: local
+  bakersfield_db_data:
+    driver: local
+  colorado_db_data:
     driver: local
 
 networks:

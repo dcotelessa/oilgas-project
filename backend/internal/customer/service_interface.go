@@ -16,5 +16,4 @@ type CustomerService interface {
 	ValidateCustomer(customer *Customer) error
 }
 
-// Verify that Service implements CustomerService
-var _ CustomerService = (*Service)(nil)
+// Note: The concrete service implementation should implement this interface

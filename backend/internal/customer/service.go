@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 	
 	"oilgas-backend/internal/auth"
 )
@@ -35,11 +34,11 @@ type Service interface {
 
 type service struct {
 	repo      Repository
-	authSvc   *auth.AuthService
+	authSvc   auth.Service
 	cache     CacheService
 }
 
-func NewService(repo Repository, authSvc *auth.AuthService, cache CacheService) Service {
+func NewService(repo Repository, authSvc auth.Service, cache CacheService) Service {
 	return &service{
 		repo:    repo,
 		authSvc: authSvc,

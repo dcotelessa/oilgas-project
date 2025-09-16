@@ -68,3 +68,50 @@ type SearchFilters struct {
 	Limit       int      `json:"limit,omitempty" validate:"omitempty,min=1,max=1000"`
 	Offset      int      `json:"offset,omitempty" validate:"omitempty,min=0"`
 }
+
+// CustomerFilter for service layer filtering
+type CustomerFilter struct {
+	TenantID    string   `json:"tenant_id,omitempty"`
+	Name        string   `json:"name,omitempty"`
+	CompanyCode string   `json:"company_code,omitempty"`
+	Status      []Status `json:"status,omitempty"`
+	TaxID       string   `json:"tax_id,omitempty"`
+	Limit       int      `json:"limit,omitempty"`
+	Offset      int      `json:"offset,omitempty"`
+}
+
+// Address represents billing/shipping address
+type Address struct {
+	Street  string `json:"street"`
+	City    string `json:"city"`
+	State   string `json:"state"`
+	ZipCode string `json:"zip_code"`
+	Country string `json:"country"`
+}
+
+// BillingInfo groups billing-related information
+type BillingInfo struct {
+	TaxID        string  `json:"tax_id"`
+	PaymentTerms string  `json:"payment_terms"`
+	Address      Address `json:"address"`
+}
+
+// ContactRegistrationResponse for contact registration workflows
+type ContactRegistrationResponse struct {
+	CustomerContact *CustomerContact `json:"customer_contact"`
+	AuthUser        interface{}      `json:"auth_user"` // Will be auth.User when auth is fixed
+	Message         string           `json:"message"`
+}
+
+// ContactInfo represents contact information for registration
+type ContactInfo struct {
+	Email     string `json:"email"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Role      string `json:"role"`
+}
+
+// BulkContactRegistrationRequest for bulk contact operations
+type BulkContactRegistrationRequest struct {
+	Contacts []ContactInfo `json:"contacts"`
+}

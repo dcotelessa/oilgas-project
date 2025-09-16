@@ -1,4 +1,4 @@
-// backend/cmd/longbeach/main.go - Long Beach location service
+// backend/cmd/colorado/main.go - Colorado location service
 package main
 
 import (
@@ -15,11 +15,11 @@ import (
 )
 
 func main() {
-	// Database configuration for Long Beach location
+	// Database configuration for Colorado location
 	dbConfig := &database.Config{
 		CentralDBURL: getDBURL("CENTRAL_AUTH_DB_URL", "DEV_CENTRAL_AUTH_DB_URL"),
 		TenantDBs: map[string]string{
-			"longbeach": getDBURL("LONGBEACH_DB_URL", "DEV_LONGBEACH_DB_URL"),
+			"colorado": getDBURL("COLORADO_DB_URL", "DEV_COLORADO_DB_URL"),
 		},
 		MaxOpenConns: 25,
 		MaxIdleConns: 5,
@@ -47,19 +47,19 @@ func main() {
 	
 	// Apply middleware
 	api := router.Group("/api/v1")
-	api.Use(tenantMiddleware("longbeach")) // Set Long Beach as default tenant
-	api.Use(authMiddleware(authSvc))       // Auth validation
+	api.Use(tenantMiddleware("colorado")) // Set Colorado as default tenant
+	api.Use(authMiddleware(authSvc))      // Auth validation
 	
 	// Register routes
 	customerHandlers.RegisterRoutes(api, authMiddleware(authSvc))
 	
-	log.Println("Long Beach location service starting on :8080")
-	log.Fatal(router.Run(":8080"))
+	log.Println("Colorado location service starting on :8082")
+	log.Fatal(router.Run(":8082"))
 }
 
 func tenantMiddleware(defaultTenant string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// For Long Beach service, always use longbeach tenant
+		// For Colorado service, always use colorado tenant
 		c.Set("tenant_id", defaultTenant)
 		c.Next()
 	}

@@ -840,18 +840,8 @@ func (r *repository) serializeTenantContext(tenantContext *TenantAccess) ([]byte
 		return nil, nil
 	}
 	
-	// Use the TenantAccess Value() method for consistent serialization
-	value, err := tenantContext.Value()
-	if err != nil {
-		return nil, err
-	}
-	
-	// Convert driver.Value to []byte
-	if bytes, ok := value.([]byte); ok {
-		return bytes, nil
-	}
-	
-	return nil, fmt.Errorf("unexpected value type from TenantAccess.Value()")
+	// Serialize single TenantAccess object as JSON
+	return json.Marshal(tenantContext)
 }
 
 // TenantAccess needs to implement driver.Valuer for individual instances
