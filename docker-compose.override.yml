@@ -1,0 +1,34 @@
+# docker-compose.override.yml.example
+
+services:
+  # Development overrides for auth database
+  auth-db:
+    environment:
+      POSTGRES_DB: auth_central_dev
+    ports:
+      - "5432:5432"  # Use standard port locally
+    volumes:
+      - ./database/dev-data/auth:/var/lib/postgresql/data  # Persist to local folder
+
+  # Development overrides for longbeach database  
+  longbeach-db:
+    environment:
+      POSTGRES_DB: location_longbeach_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./database/dev-data/longbeach:/var/lib/postgresql/data
+
+  # Development app with hot reloading
+  app:
+    build:
+      target: builder  # Stop at builder stage for development
+    environment:
+      GIN_MODE: debug
+      LOG_LEVEL: debug
+    volumes:
+      - .:/app  # Mount source code for hot reloading
+      - /app/vendor  # Exclude vendor directory
+    command: ["go", "run", "cmd/longbeach/main.go"]
+
+

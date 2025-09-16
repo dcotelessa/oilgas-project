@@ -1,326 +1,150 @@
 // backend/internal/customer/handlers.go
-// Clean HTTP handlers using service interface
 package customer
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
-
-	"github.com/gorilla/mux"
+	
+	"github.com/gin-gonic/gin"
 )
 
-// Handler handles HTTP requests for customer operations
-type Handler struct {
-	service CustomerService // Use interface instead of concrete type
+type Handlers struct {
+	service Service
 }
 
-// NewHandler creates a new customer handler
-func NewHandler(service CustomerService) *Handler {
-	return &Handler{service: service}
+func NewHandlers(service Service) *Handlers {
+	return &Handlers{service: service}
 }
 
-// APIResponse represents a standard API response
-type APIResponse struct {
-	Success bool        `json:"success"`
-	Data    interface{} `json:"data,omitempty"`
-	Error   string      `json:"error,omitempty"`
-	Message string      `json:"message,omitempty"`
+func (h *Handlers) RegisterRoutes(router *gin.RouterGroup, authMiddleware gin.HandlerFunc) {
+	customers := router.Group("/customers")
+	customers.Use(authMiddleware)
+	
+	customers.GET("", h.SearchCustomers)
+	customers.POST("", h.CreateCustomer)
+	customers.GET("/:id", h.GetCustomer)
+	customers.PUT("/:id", h.UpdateCustomer)
+	customers.DELETE("/:id", h.DeleteCustomer)
+	
+	customers.GET("/:id/contacts", h.GetCustomerContacts)
+	customers.POST("/:id/contacts", h.RegisterCustomerContact)
+	customers.DELETE("/:id/contacts/:userId", h.RemoveCustomerContact)
+	
+	customers.GET("/:id/analytics", h.GetCustomerAnalytics)
+	customers.GET("/analytics", h.GetTenantAnalytics)
 }
 
-// ErrorResponse creates an error response
-func ErrorResponse(w http.ResponseWriter, statusCode int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(APIResponse{
-		Success: false,
-		Error:   message,
+func (h *Handlers) GetCustomer(c *gin.Context) {
+	tenantID := c.GetString("tenant_id")
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid customer ID"})
+		return
+	}
+	
+	customer, err := h.service.GetCustomer(c.Request.Context(), tenantID, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Customer not found"})
+		return
+	}
+	
+	c.JSON(http.StatusOK, customer)
+}
+
+func (h *Handlers) SearchCustomers(c *gin.Context) {
+	tenantID := c.GetString("tenant_id")
+	
+	filters := SearchFilters{
+		Name:        c.Query("name"),
+		CompanyCode: c.Query("company_code"),
+		TaxID:       c.Query("tax_id"),
+	}
+	
+	if limit := c.Query("limit"); limit != "" {
+		if l, err := strconv.Atoi(limit); err == nil {
+			filters.Limit = l
+		}
+	}
+	
+	if offset := c.Query("offset"); offset != "" {
+		if o, err := strconv.Atoi(offset); err == nil {
+			filters.Offset = o
+		}
+	}
+	
+	customers, total, err := h.service.SearchCustomers(c.Request.Context(), tenantID, filters)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to search customers"})
+		return
+	}
+	
+	c.JSON(http.StatusOK, gin.H{
+		"data":  customers,
+		"total": total,
 	})
 }
 
-// SuccessResponse creates a success response
-func SuccessResponse(w http.ResponseWriter, data interface{}, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(APIResponse{
-		Success: true,
-		Data:    data,
-		Message: message,
-	})
+type CreateCustomerRequest struct {
+	Name        string      `json:"name" binding:"required"`
+	CompanyCode string      `json:"company_code" binding:"required"`
+	BillingInfo BillingInfo `json:"billing_info" binding:"required"`
 }
 
-// RegisterRoutes registers all customer routes
-func (h *Handler) RegisterRoutes(router *mux.Router) {
-	// Customer CRUD operations
-	router.HandleFunc("/customers", h.GetCustomers).Methods("GET")
-	router.HandleFunc("/customers", h.CreateCustomer).Methods("POST")
-	router.HandleFunc("/customers/{id:[0-9]+}", h.GetCustomerByID).Methods("GET")
-	router.HandleFunc("/customers/{id:[0-9]+}", h.UpdateCustomer).Methods("PUT")
-	router.HandleFunc("/customers/{id:[0-9]+}", h.DeleteCustomer).Methods("DELETE")
+func (h *Handlers) CreateCustomer(c *gin.Context) {
+	tenantID := c.GetString("tenant_id")
 	
-	// Search and analytics
-	router.HandleFunc("/customers/search", h.SearchCustomers).Methods("GET")
-	router.HandleFunc("/customers/stats", h.GetCustomerStats).Methods("GET")
-	
-	// Tenant management
-	router.HandleFunc("/tenant/context", h.SetTenantContext).Methods("POST")
-	router.HandleFunc("/tenant/context", h.GetTenantContext).Methods("GET")
-}
-
-// GetCustomers retrieves customers for a tenant
-func (h *Handler) GetCustomers(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = r.URL.Query().Get("tenant_id")
+	var req CreateCustomerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 	
-	if tenantID == "" {
-		ErrorResponse(w, http.StatusBadRequest, "tenant ID is required")
-		return
-	}
-
-	customers, err := h.service.GetCustomersByTenant(tenantID)
-	if err != nil {
-		ErrorResponse(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	SuccessResponse(w, customers, "Customers retrieved successfully")
-}
-
-// GetCustomerByID retrieves a specific customer
-func (h *Handler) GetCustomerByID(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	customerID, err := strconv.Atoi(vars["id"])
-	if err != nil {
-		ErrorResponse(w, http.StatusBadRequest, "invalid customer ID")
-		return
-	}
-
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = r.URL.Query().Get("tenant_id")
+	customer := &Customer{
+		TenantID:    tenantID,
+		Name:        req.Name,
+		CompanyCode: req.CompanyCode,
+		BillingInfo: req.BillingInfo,
+		Status:      StatusActive,
 	}
 	
-	if tenantID == "" {
-		ErrorResponse(w, http.StatusBadRequest, "tenant ID is required")
-		return
-	}
-
-	customer, err := h.service.GetCustomerByID(tenantID, customerID)
+	err := h.service.CreateCustomer(c.Request.Context(), customer)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorResponse(w, http.StatusNotFound, err.Error())
-		} else {
-			ErrorResponse(w, http.StatusInternalServerError, err.Error())
-		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
-	}
-
-	SuccessResponse(w, customer, "Customer retrieved successfully")
-}
-
-// SearchCustomers performs filtered customer search
-func (h *Handler) SearchCustomers(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = r.URL.Query().Get("tenant_id")
 	}
 	
-	if tenantID == "" {
-		ErrorResponse(w, http.StatusBadRequest, "tenant ID is required")
-		return
-	}
+	c.JSON(http.StatusCreated, customer)
+}
 
-	// Parse query parameters
-	filter := CustomerFilter{
-		TenantID: tenantID,
-		State:    r.URL.Query().Get("state"),
-		Search:   r.URL.Query().Get("search"),
-	}
+type RegisterContactRequest struct {
+	Email     string `json:"email" binding:"required,email"`
+	FirstName string `json:"first_name" binding:"required"`
+	LastName  string `json:"last_name" binding:"required"`
+	Role      string `json:"role" binding:"required"`
+}
 
-	// Parse boolean parameters
-	if includeDeleted := r.URL.Query().Get("include_deleted"); includeDeleted == "true" {
-		filter.IncludeDeleted = true
-	}
-
-	// Parse pagination parameters
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 {
-			filter.Limit = limit
-		}
-	}
-
-	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
-		if offset, err := strconv.Atoi(offsetStr); err == nil && offset >= 0 {
-			filter.Offset = offset
-		}
-	}
-
-	customers, err := h.service.SearchCustomers(filter)
+func (h *Handlers) RegisterCustomerContact(c *gin.Context) {
+	tenantID := c.GetString("tenant_id")
+	customerID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		ErrorResponse(w, http.StatusInternalServerError, err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid customer ID"})
 		return
-	}
-
-	SuccessResponse(w, customers, "Search completed successfully")
-}
-
-// CreateCustomer creates a new customer
-func (h *Handler) CreateCustomer(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		ErrorResponse(w, http.StatusBadRequest, "tenant ID is required in header")
-		return
-	}
-
-	var customer Customer
-	if err := json.NewDecoder(r.Body).Decode(&customer); err != nil {
-		ErrorResponse(w, http.StatusBadRequest, "invalid JSON payload")
-		return
-	}
-
-	// Set tenant ID from header
-	customer.TenantID = tenantID
-
-	if err := h.service.CreateCustomer(&customer); err != nil {
-		if strings.Contains(err.Error(), "validation") {
-			ErrorResponse(w, http.StatusBadRequest, err.Error())
-		} else {
-			ErrorResponse(w, http.StatusInternalServerError, err.Error())
-		}
-		return
-	}
-
-	SuccessResponse(w, customer, "Customer created successfully")
-}
-
-// UpdateCustomer updates an existing customer
-func (h *Handler) UpdateCustomer(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	customerID, err := strconv.Atoi(vars["id"])
-	if err != nil {
-		ErrorResponse(w, http.StatusBadRequest, "invalid customer ID")
-		return
-	}
-
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		ErrorResponse(w, http.StatusBadRequest, "tenant ID is required in header")
-		return
-	}
-
-	var customer Customer
-	if err := json.NewDecoder(r.Body).Decode(&customer); err != nil {
-		ErrorResponse(w, http.StatusBadRequest, "invalid JSON payload")
-		return
-	}
-
-	// Set ID and tenant from URL and header
-	customer.CustomerID = customerID
-	customer.TenantID = tenantID
-
-	if err := h.service.UpdateCustomer(&customer); err != nil {
-		if strings.Contains(err.Error(), "validation") {
-			ErrorResponse(w, http.StatusBadRequest, err.Error())
-		} else if strings.Contains(err.Error(), "not found") {
-			ErrorResponse(w, http.StatusNotFound, err.Error())
-		} else {
-			ErrorResponse(w, http.StatusInternalServerError, err.Error())
-		}
-		return
-	}
-
-	SuccessResponse(w, customer, "Customer updated successfully")
-}
-
-// DeleteCustomer soft deletes a customer
-func (h *Handler) DeleteCustomer(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	customerID, err := strconv.Atoi(vars["id"])
-	if err != nil {
-		ErrorResponse(w, http.StatusBadRequest, "invalid customer ID")
-		return
-	}
-
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		ErrorResponse(w, http.StatusBadRequest, "tenant ID is required in header")
-		return
-	}
-
-	if err := h.service.SoftDeleteCustomer(tenantID, customerID); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorResponse(w, http.StatusNotFound, err.Error())
-		} else {
-			ErrorResponse(w, http.StatusInternalServerError, err.Error())
-		}
-		return
-	}
-
-	SuccessResponse(w, nil, "Customer deleted successfully")
-}
-
-// GetCustomerStats returns customer statistics
-func (h *Handler) GetCustomerStats(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = r.URL.Query().Get("tenant_id")
 	}
 	
-	if tenantID == "" {
-		ErrorResponse(w, http.StatusBadRequest, "tenant ID is required")
+	var req RegisterContactRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	stats, err := h.service.GetCustomerStats(tenantID)
+	
+	err = h.service.RegisterCustomerContact(
+		c.Request.Context(), tenantID, customerID,
+		req.Email, req.FirstName, req.LastName, req.Role,
+	)
 	if err != nil {
-		ErrorResponse(w, http.StatusInternalServerError, err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	SuccessResponse(w, stats, "Statistics retrieved successfully")
-}
-
-// SetTenantContext sets the tenant context
-func (h *Handler) SetTenantContext(w http.ResponseWriter, r *http.Request) {
-	var request struct {
-		TenantID string `json:"tenant_id"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		ErrorResponse(w, http.StatusBadRequest, "invalid JSON payload")
-		return
-	}
-
-	if request.TenantID == "" {
-		ErrorResponse(w, http.StatusBadRequest, "tenant ID is required")
-		return
-	}
-
-	if err := h.service.SetTenantContext(request.TenantID); err != nil {
-		ErrorResponse(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	SuccessResponse(w, map[string]string{"tenant_id": request.TenantID}, "Tenant context set successfully")
-}
-
-// GetTenantContext returns the current tenant context
-func (h *Handler) GetTenantContext(w http.ResponseWriter, r *http.Request) {
-	tenantID, err := h.service.GetCurrentTenant()
-	if err != nil {
-		ErrorResponse(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	SuccessResponse(w, map[string]string{"tenant_id": tenantID}, "Current tenant context retrieved")
-}
-
-// Health check endpoint
-func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
-	SuccessResponse(w, map[string]string{
-		"status":  "healthy",
-		"service": "customer-service",
-	}, "Service is healthy")
+	
+	c.JSON(http.StatusCreated, gin.H{"message": "Customer contact registered successfully"})
 }

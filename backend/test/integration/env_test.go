@@ -40,7 +40,7 @@ func TestEnvironmentLoads(t *testing.T) {
     }
     
     // Test key environment variables exist
-    requiredVars := []string{"DATABASE_URL", "POSTGRES_DB"}
+    requiredVars := []string{"CENTRAL_AUTH_DB_URL", "LONGBEACH_DB_URL"}
     
     for _, varName := range requiredVars {
         value := os.Getenv(varName)
@@ -51,13 +51,23 @@ func TestEnvironmentLoads(t *testing.T) {
         }
     }
     
-    // Test DATABASE_URL format
-    databaseURL := os.Getenv("DATABASE_URL")
-    if databaseURL != "" {
-        if len(databaseURL) < 10 {
-            t.Errorf("DATABASE_URL seems too short: %s", databaseURL)
+    // Test database URL formats
+    centralAuthURL := os.Getenv("CENTRAL_AUTH_DB_URL")
+    longbeachURL := os.Getenv("LONGBEACH_DB_URL")
+    
+    if centralAuthURL != "" {
+        if len(centralAuthURL) < 10 {
+            t.Errorf("CENTRAL_AUTH_DB_URL seems too short: %s", centralAuthURL)
         } else {
-            t.Logf("✅ DATABASE_URL format looks good")
+            t.Logf("✅ CENTRAL_AUTH_DB_URL format looks good")
+        }
+    }
+    
+    if longbeachURL != "" {
+        if len(longbeachURL) < 10 {
+            t.Errorf("LONGBEACH_DB_URL seems too short: %s", longbeachURL)
+        } else {
+            t.Logf("✅ LONGBEACH_DB_URL format looks good")
         }
     }
 }

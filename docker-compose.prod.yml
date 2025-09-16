@@ -1,0 +1,74 @@
+# docker-compose.prod.yml
+services:
+  auth-db:
+    image: postgres:15
+    container_name: auth_central_prod
+    environment:
+      POSTGRES_DB: auth_central
+      POSTGRES_USER: ${AUTH_DB_USER}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD}
+    volumes:
+      - auth_prod_data:/var/lib/postgresql/data
+      - ./database/init/auth:/docker-entrypoint-initdb.d
+    networks:
+      - oil_gas_prod
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AUTH_DB_USER} -d auth_central"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  longbeach-db:
+    image: postgres:15
+    container_name: location_longbeach_prod
+    environment:
+      POSTGRES_DB: location_longbeach
+      POSTGRES_USER: ${LONGBEACH_DB_USER}
+      POSTGRES_PASSWORD: ${LONGBEACH_DB_PASSWORD}
+    volumes:
+      - longbeach_prod_data:/var/lib/postgresql/data
+      - ./database/init/longbeach:/docker-entrypoint-initdb.d
+    networks:
+      - oil_gas_prod
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LONGBEACH_DB_USER} -d location_longbeach"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  app:
+    image: oil-gas-app:latest
+    container_name: oil_gas_app_prod
+    environment:
+      GIN_MODE: release
+      LOG_LEVEL: info
+      CENTRAL_AUTH_DB_URL: ${CENTRAL_AUTH_DB_URL}
+      LONGBEACH_DB_URL: ${LONGBEACH_DB_URL}
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "80:8080"
+    depends_on:
+      auth-db:
+        condition: service_healthy
+      longbeach-db:
+        condition: service_healthy
+    networks:
+      - oil_gas_prod
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  auth_prod_data:
+    driver: local
+  longbeach_prod_data:
+    driver: local
+
+networks:
+  oil_gas_prod:
+    driver: bridge

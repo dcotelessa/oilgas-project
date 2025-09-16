@@ -1,356 +1,296 @@
-# Oil & Gas Inventory Management System
+# Oil & Gas Multi-Tenant Inventory System
 
-A modern, multi-tenant inventory management system designed specifically for the oil & gas industry. Built with Go, PostgreSQL, and Vue.js.
-
-## 🎯 Overview
-
-This system replaces legacy ColdFusion applications with a modern, scalable architecture featuring:
-
-- **Multi-tenant architecture** - Support for multiple divisions/locations
-- **Row-level security** - Automatic data isolation between tenants
-- **Real-time inventory tracking** - Pipes, casings, and equipment management
-- **Customer relationship management** - Oil & gas company customer tracking
-- **Modern tech stack** - Go backend, PostgreSQL database, Vue.js frontend
+A comprehensive multi-tenant inventory management system for oil & gas operations with separate databases per location and centralized authentication.
 
 ## 🏗️ Architecture
 
-### Tech Stack
-- **Backend**: Go 1.21+ with Gin framework
-- **Database**: PostgreSQL 15+ with Row-Level Security (RLS)
-- **Frontend**: Vue.js 3 (planned)
-- **Authentication**: Session-based with tenant context
-- **Deployment**: Docker-ready
+### Database Structure
+- **Central Auth Database** (`auth_central`): Cross-tenant users, permissions, sessions
+- **Tenant Databases**: Separate database per location (Long Beach, Bakersfield, etc.)
+  - `location_longbeach`: Customers, inventory, work orders, invoices
+  - `location_bakersfield`: (Future) Same schema, separate data
+  - `location_colorado`: (Future) Same schema, separate data
 
-### Database Schema
-```
-store.tenants                    # Internal divisions (West Texas, Gulf Coast, etc.)
-store.customers                  # External oil & gas companies
-store.users                      # System users with tenant assignments
-store.inventory                  # Current inventory items
-store.received                   # Work orders and incoming materials
-store.customer_tenant_assignments # Customer-tenant relationships
-store.user_tenant_roles          # User permissions within tenants
-```
+### Services
+- **Customer Domain**: Customer management with tenant isolation
+- **Auth Domain**: Multi-tenant authentication and authorization  
+- **Inventory Domain**: (Next) Inventory tracking and management
+- **Work Order Domain**: (Next) Service workflow management
 
 ## 🚀 Quick Start
 
 ### Prerequisites
+- Docker & Docker Compose
 - Go 1.21+
-- PostgreSQL 15+
-- Make (for build commands)
+- Make (optional, for convenience commands)
 
-### Installation
+### Development Setup
 
-1. **Clone and setup**
-   ```bash
-   git clone https://github.com/dcotelessa/oilgas-project
-   cd oilgas-project
-   ```
+1. **Clone and setup environment:**
+```bash
+git clone <your-repo>
+cd oil-gas-inventory
+cp .env.example .env
+# Update .env with your preferred settings
+```
 
-2. **Configure environment**
-   ```bash
-   # Create .env.local with your database settings
-   cp .env.example .env.local
-   # Edit .env.local with your database credentials
-   ```
+2. **Start development environment:**
+```bash
+make dev-setup
+```
+This will:
+- Start both databases (auth + Long Beach)
+- Run database migrations
+- Seed test data
+- Verify everything is working
 
-3. **Setup database and run migrations**
-   ```bash
-   # Complete setup (creates database, schema, and tenant architecture)
-   ./scripts/setup.sh
-   
-   # Run tenant setup
-   make setup
-   ```
+3. **Start the application:**
+```bash
+make app-run
+```
 
-4. **Start development server**
-   ```bash
-   make dev
-   ```
+4. **Access the system:**
+- API: http://localhost:8080
+- PgAdmin: http://localhost:8081 (optional)
 
-### Environment Configuration
+### Manual Setup (if not using Make)
 
-Create `.env.local` with your database settings:
+1. **Start databases:**
+```bash
+docker-compose up -d auth-db longbeach-db
+```
+
+2. **Run migrations:**
+```bash
+go run database/scripts/migrate.go auth up
+go run database/scripts/migrate.go longbeach up
+```
+
+3. **Seed test data:**
+```bash
+go run cmd/tools/seed/main.go --tenant=longbeach --customers=10 --inventory=50
+```
+
+## 📊 Database Management
+
+### Common Commands
+```bash
+# Database operations
+make db-up          # Start databases
+make db-down        # Stop databases  
+make db-status      # Check database health
+make db-reset       # Reset all data (DESTRUCTIVE)
+
+# Migrations
+make migrate-auth-up    # Run auth migrations
+make migrate-lb-up      # Run Long Beach migrations
+make migrate-status     # Check migration status
+
+# Database access
+make db-shell-auth      # Access auth database shell
+make db-shell-longbeach # Access Long Beach database shell
+
+# Backups
+make backup-all        # Backup both databases
+```
+
+### Migration from Access Database
+
+1. **Export your Access customers to JSON:**
+```json
+[
+  {
+    "id": "1",
+    "company_name": "Chevron Corporation",
+    "company_code": "CHEV001",
+    "billing_address": "123 Oil St",
+    "city": "Houston",
+    "state": "TX",
+    "zip_code": "77001",
+    "tax_id": "12-3456789",
+    "payment_terms": "NET30",
+    "status": "active",
+    "primary_contact": "John Smith",
+    "contact_email": "john@chevron.com"
+  }
+]
+```
+
+2. **Run migration:**
+```bash
+make migrate-customers
+# Or directly:
+go run cmd/tools/migrate-customers/main.go --tenant=longbeach --file=customers.json
+```
+
+## 🔧 Development
+
+### Project Structure
+```
+├── backend/
+│   ├── internal/
+│   │   ├── customer/      # Customer domain
+│   │   ├── auth/          # Authentication domain
+│   │   └── shared/        # Shared utilities
+│   └── cmd/
+│       ├── longbeach/     # Long Beach service
+│       └── tools/         # Migration utilities
+├── database/
+│   ├── init/             # Initial schemas
+│   ├── migrations/       # Version migrations  
+│   └── scripts/          # Migration tools
+└── scripts/              # Setup scripts
+```
+
+### Adding a New Tenant
+
+1. **Add tenant to auth database:**
+```sql
+INSERT INTO tenants (id, name, location, database_name) 
+VALUES ('bakersfield', 'Bakersfield Operations', 'Bakersfield, CA', 'location_bakersfield');
+```
+
+2. **Update docker-compose.yml:**
+```yaml
+bakersfield-db:
+  image: postgres:15
+  container_name: location_bakersfield_db
+  environment:
+    POSTGRES_DB: location_bakersfield
+    # ... rest of config
+```
+
+3. **Create tenant-specific service:**
+```bash
+cp -r cmd/longbeach cmd/bakersfield
+# Update tenant references in code
+```
+
+## 🧪 Testing
 
 ```bash
-# Database Configuration
-DATABASE_URL=postgresql://username:password@localhost:5433/oilgas_inventory_local
-POSTGRES_DB=oilgas_inventory_local
-POSTGRES_USER=username
-POSTGRES_PASSWORD=password
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5433
+# Unit tests
+make app-test
 
-# Application Configuration
-APP_ENV=local
-APP_PORT=8000
+# Integration tests (requires databases)
+make app-test-integration
+
+# Test specific domain
+go test ./internal/customer/...
 ```
 
-## 📋 Available Commands
+## 📚 API Documentation
 
-### Database Operations
+### Customer Management
+
+**Create Customer:**
 ```bash
-make db-status              # Check database connection and tables
-make setup                  # Run complete tenant setup
-make migrate                # Run tenant migrations
-make seed-data              # Seed default tenant data
+POST /api/v1/customers
+{
+  "name": "Test Oil Company",
+  "company_code": "TEST001",
+  "billing_info": {
+    "tax_id": "12-3456789",
+    "payment_terms": "NET30",
+    "address": {
+      "street": "123 Oil St",
+      "city": "Houston",
+      "state": "TX",
+      "zip_code": "77001"
+    }
+  }
+}
 ```
 
-### Development
+**Search Customers:**
 ```bash
-make dev                    # Start development server
-make env-info              # Show environment configuration
-make help                  # Show all available commands
+GET /api/v1/customers?name=oil&status=active&limit=20&offset=0
 ```
 
-### Tenant Management
+**Register Customer Contact:**
 ```bash
-make create-tenant         # Create new tenant (interactive)
-make list-tenants          # List all tenants
-make tenant-status         # Show comprehensive tenant status
+POST /api/v1/customers/{id}/contacts
+{
+  "email": "contact@company.com",
+  "first_name": "John",
+  "last_name": "Smith",
+  "role": "manager"
+}
 ```
-
-### Debugging
-```bash
-make debug-migrations      # Debug migration status
-make ensure-basic-schema   # Verify basic tables exist
-```
-
-## 🏢 Multi-Tenant Architecture
-
-### Tenant Concepts
-
-**Tenants** = Internal divisions of your company
-- West Texas Division
-- Gulf Coast Division  
-- Permian Basin Operations
-- etc.
-
-**Customers** = External oil & gas companies
-- Chevron, ExxonMobil, Shell, etc.
-- Can be served by multiple tenants
-
-**Users** = Your employees
-- Belong to specific tenants
-- Have roles within those tenants (admin, manager, operator, viewer)
-
-### Data Isolation
-
-Row-Level Security (RLS) ensures:
-- ✅ Users only see their tenant's data
-- ✅ Admins can see all data or switch tenant context
-- ✅ Customers are properly assigned to tenants
-- ✅ No cross-tenant data leakage
-
-### Example Usage
-
-```bash
-# Create a new division
-make create-tenant
-# Enter: "West Texas Division"
-
-# Assign customers to tenants
-make assign-customer-to-tenant
-# Customer ID: 1, Tenant ID: 2, Type: primary
-
-# Test tenant isolation
-psql "$DATABASE_URL" -c "SET app.current_tenant_id = 1; SELECT COUNT(*) FROM store.inventory;"
-```
-
-## 🗄️ Database Schema Details
-
-### Core Tables
-
-#### `store.tenants`
-Internal company divisions with settings and configuration.
-
-#### `store.customers` 
-External oil & gas companies that purchase services.
-
-#### `store.users`
-System users with tenant assignments and roles.
-
-#### `store.inventory`
-Current inventory items (pipes, casings, equipment) with tenant ownership.
-
-#### `store.received`
-Work orders and incoming materials with processing status.
-
-### Relationship Tables
-
-#### `store.customer_tenant_assignments`
-Many-to-many relationship between customers and tenants.
-
-#### `store.user_tenant_roles`
-User permissions within specific tenants.
-
-### Reference Data
-
-#### `store.grade`
-Oil & gas industry standard grades (J55, L80, P110, etc.).
-
-#### `store.sizes`
-Standard pipe sizes (5 1/2", 7", 9 5/8", etc.).
-
-## 🔧 Development Setup
-
-### Backend Structure
-```
-backend/
-├── cmd/server/              # Main application entry point
-├── internal/
-│   ├── models/              # Data models and structs
-│   ├── handlers/            # HTTP request handlers  
-│   ├── middleware/          # Authentication, tenant context
-│   ├── repository/          # Database access layer
-│   └── services/            # Business logic
-├── migrations/              # Database migration files
-├── seeds/                   # Database seed data
-└── test/                    # Test files
-```
-
-### Adding New Features
-
-1. **Add database changes** to new migration files
-2. **Create Go models** in `internal/models/`
-3. **Add repository methods** in `internal/repository/`
-4. **Implement business logic** in `internal/services/`
-5. **Create API handlers** in `internal/handlers/`
-6. **Add routes** to main server
-
-### Testing
-
-```bash
-# Run all tests
-make test
-
-# Test tenant isolation
-make test-tenant-isolation
-
-# Run specific test suites
-cd backend && go test ./internal/services/
-```
-
-## 🔐 Security Features
-
-### Row-Level Security (RLS)
-- Automatic data filtering by tenant
-- Admin bypass capabilities
-- Context-aware queries
 
 ### Authentication
-- Session-based authentication
-- Tenant context management
-- Role-based permissions
-
-### Data Protection
-- SQL injection prevention
-- Input validation
-- Audit trails
-
-## 📊 API Endpoints
-
-### Health & Status
-- `GET /health` - Service health check
-- `GET /api/v1/status` - API status
-
-### Tenant Management (Admin Only)
-- `POST /api/v1/tenants` - Create tenant
-- `GET /api/v1/tenants` - List tenants
-- `GET /api/v1/tenants/:id` - Get tenant details
-
-### Business Operations (Tenant-Aware)
-- `GET /api/v1/customers` - List customers for current tenant
-- `GET /api/v1/inventory` - List inventory for current tenant
-- `GET /api/v1/received` - List work orders for current tenant
-
-### Context Management
-- `GET /api/v1/tenant/current` - Get current tenant context
-- `POST /api/v1/tenant/switch` - Switch tenant (admin only)
-
-## 🚀 Deployment
-
-### Docker Setup
+All API calls require authentication headers:
 ```bash
-# Build image
-docker build -t oil-gas-inventory .
-
-# Run with PostgreSQL
-docker-compose up -d
+curl -H "Authorization: Bearer <jwt-token>" \
+     -H "X-Tenant-ID: longbeach" \
+     http://localhost:8080/api/v1/customers
 ```
 
-### Production Considerations
-- Set `APP_ENV=production`
-- Use connection pooling
-- Enable PostgreSQL logging
-- Set up backup procedures
-- Configure SSL/TLS
+## 🔒 Security
 
-## 📈 Performance
+### Multi-Tenant Isolation
+- **Database Level**: Completely separate databases per tenant
+- **Application Level**: Tenant ID validation in all operations
+- **User Level**: Role-based permissions per tenant
 
-### Database Optimization
-- Indexes on tenant_id columns
-- Connection pooling (25 max, 10 idle)
-- Query optimization for RLS
+### Customer Contact Access
+Customer contacts can only access their own company's data through the customer filter middleware.
 
-### Expected Performance
-- Work order lookup: < 25ms
-- Customer search: < 50ms  
-- Material search: < 100ms
-- State transitions: < 200ms
+## 🚧 Next Steps
 
-## 🔄 Migration History
+### Phase 1: Current - Customer Foundation ✅
+- [x] Multi-database architecture
+- [x] Customer CRUD operations
+- [x] Customer contact management
+- [x] Migration from Access
 
-### Phase 1 ✅
-Legacy MDB data migration and normalization.
+### Phase 2: Work Order Service (Next)
+- [ ] Work order domain implementation
+- [ ] Inventory integration
+- [ ] Service workflow management
+- [ ] Invoice generation
 
-### Phase 2 ✅  
-Go backend structure and basic API framework.
+### Phase 3: Multi-Location Expansion
+- [ ] Bakersfield tenant setup
+- [ ] Cross-location reporting
+- [ ] Enterprise analytics
 
-### Phase 3.5 ✅ (Current)
-Multi-tenant architecture with Row-Level Security.
+## 🆘 Troubleshooting
 
-### Phase 4 (Planned)
-Business logic implementation and workflow management.
+**Database Connection Issues:**
+```bash
+# Check database status
+make db-status
 
-### Phase 5 (Planned)
-Vue.js frontend and customer portal.
+# View database logs
+make db-logs
 
-## 🤝 Contributing
+# Reset databases if corrupted
+make db-reset
+```
 
-1. **Fork the repository**
-2. **Create feature branch** (`git checkout -b feature/amazing-feature`)
-3. **Commit changes** (`git commit -m 'Add amazing feature'`)
-4. **Push to branch** (`git push origin feature/amazing-feature`)
-5. **Open Pull Request**
+**Migration Issues:**
+```bash
+# Check migration status
+make migrate-status
 
-### Development Guidelines
-- Follow Go conventions and best practices
-- Add tests for new functionality
-- Update documentation for API changes
-- Ensure tenant isolation for new features
+# Manual migration rollback
+go run database/scripts/migrate.go longbeach down
+```
 
-## 📝 License
+**Application Issues:**
+```bash
+# Check environment variables
+cat .env
 
-This project is proprietary software for internal use.
+# Run with debug logging
+LOG_LEVEL=debug make app-run
+```
 
 ## 📞 Support
 
-For questions or issues:
-- Check existing issues in the repository
-- Review the documentation in `docs/`
-- Contact the development team
-
----
-
-## 🎯 Current Status
-
-✅ **Multi-tenant database architecture**  
-✅ **Row-Level Security implementation**  
-✅ **Basic API framework**  
-✅ **Tenant management system**  
-✅ **Customer-tenant relationships**  
-✅ **Development environment setup**  
-
-🔄 **In Progress**: Business logic implementation (Phase 4)  
-📅 **Next**: Frontend development (Phase 5)
+For issues with:
+- **Database setup**: Check docker-compose logs
+- **Migrations**: Verify database connectivity and permissions
+- **Customer migration**: Validate JSON format and required fields
+- **Authentication**: Verify JWT tokens and tenant access

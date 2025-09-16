@@ -5,18 +5,20 @@ import (
 )
 
 type DatabaseConfig struct {
-	AuthDatabaseURL      string
-	TenantDatabaseBaseURL string
-	MaxOpenConns         int
-	MaxIdleConns         int
+	CentralAuthURL   string
+	LongBeachURL     string
+	BakersfieldURL   string
+	MaxOpenConns     int
+	MaxIdleConns     int
 }
 
 func NewDatabaseConfig() *DatabaseConfig {
 	return &DatabaseConfig{
-		AuthDatabaseURL:      getEnv("AUTH_DATABASE_URL", "postgresql://user:password@localhost/oilgas_auth?sslmode=disable"),
-		TenantDatabaseBaseURL: getEnv("TENANT_DATABASE_BASE_URL", "postgresql://user:password@localhost"),
-		MaxOpenConns:         10,
-		MaxIdleConns:         5,
+		CentralAuthURL:   getEnv("CENTRAL_AUTH_DB_URL", "postgresql://auth_user:secure_auth_password_2024@localhost:5432/auth_central?sslmode=disable"),
+		LongBeachURL:     getEnv("LONGBEACH_DB_URL", "postgresql://longbeach_user:secure_longbeach_password_2024@localhost:5433/location_longbeach?sslmode=disable"),
+		BakersfieldURL:   getEnv("BAKERSFIELD_DB_URL", ""), // Empty default - not implemented yet
+		MaxOpenConns:     10,
+		MaxIdleConns:     5,
 	}
 }
 

@@ -1,0 +1,113 @@
+# Makefile.integration - Integration test management
+.PHONY: test-integration test-integration-setup test-integration-cleanup test-integration-verbose test-integration-quick
+
+# Default integration test environment variables
+export CENTRAL_AUTH_DB_URL ?= postgresql://auth_user:secure_auth_password_2024@localhost:5432/auth_central?sslmode=disable
+export LONGBEACH_DB_URL ?= postgresql://longbeach_user:secure_longbeach_password_2024@localhost:5433/location_longbeach?sslmode=disable
+export TEST_TIMEOUT_SECONDS ?= 300
+export TEST_CLEANUP_DATA ?= true
+export TEST_VERBOSE ?= false
+
+# Integration test commands
+test-integration-setup:
+	@echo "🚀 Setting up integration test environment..."
+	@docker-compose ps | grep -E "(auth_central_db|location_longbeach_db)" | grep "Up" || { \
+		echo "❌ Required databases are not running. Starting them..."; \
+		docker-compose up -d auth-db longbeach-db; \
+		echo "⏳ Waiting for databases to be ready..."; \
+		sleep 10; \
+	}
+	@echo "✅ Integration test environment ready"
+
+test-integration-cleanup:
+	@echo "🧹 Cleaning up integration test environment..."
+	@go run ./test/integration/cleanup_test_data.go || echo "⚠️  Cleanup script not found, skipping..."
+	@echo "✅ Integration test cleanup completed"
+
+test-integration: test-integration-setup
+	@echo "🧪 Running integration tests..."
+	@cd test/integration && go test -v -timeout=${TEST_TIMEOUT_SECONDS}s ./...
+	@echo "✅ Integration tests completed"
+
+test-integration-verbose: 
+	@echo "🧪 Running integration tests (verbose)..."
+	$(MAKE) test-integration TEST_VERBOSE=true
+
+test-integration-quick:
+	@echo "🧪 Running quick integration tests..."
+	@cd test/integration && go test -v -short -timeout=60s ./...
+
+test-integration-multi-tenant:
+	@echo "🏢 Running multi-tenant isolation tests..."
+	@cd test/integration && go test -v -run TestMultiTenant ./...
+
+test-integration-auth:
+	@echo "🔐 Running auth integration tests..."
+	@cd test/integration && go test -v -run TestAuth ./...
+
+test-integration-db:
+	@echo "💾 Running database operations tests..."
+	@cd test/integration && go test -v -run TestDatabase ./...
+
+test-integration-performance:
+	@echo "⚡ Running performance tests..."
+	@cd test/integration && go test -v -run TestPerformance ./...
+
+test-integration-ci:
+	@echo "🤖 Running integration tests for CI/CD..."
+	@$(MAKE) test-integration-setup
+	@cd test/integration && go test -v -timeout=180s -json ./... > integration_test_results.json
+	@echo "✅ CI integration tests completed"
+
+# Database management for tests
+test-db-reset:
+	@echo "🔄 Resetting test databases..."
+	@docker-compose down -v auth-db longbeach-db
+	@docker-compose up -d auth-db longbeach-db
+	@sleep 15
+	@echo "✅ Test databases reset"
+
+test-db-status:
+	@echo "📊 Integration test database status:"
+	@echo "Auth DB:"
+	@docker exec auth_central_db psql -U auth_user -d auth_central -c "SELECT 'Auth DB: Connected' as status, NOW() as timestamp;" 2>/dev/null || echo "❌ Auth DB: Not accessible"
+	@echo "Longbeach DB:"
+	@docker exec location_longbeach_db psql -U longbeach_user -d location_longbeach -c "SELECT 'Longbeach DB: Connected' as status, NOW() as timestamp;" 2>/dev/null || echo "❌ Longbeach DB: Not accessible"
+
+# Test coverage for integration tests
+test-integration-coverage:
+	@echo "📈 Running integration tests with coverage..."
+	@cd test/integration && go test -v -coverprofile=integration_coverage.out ./...
+	@go tool cover -html=test/integration/integration_coverage.out -o integration_coverage.html
+	@echo "✅ Coverage report generated: integration_coverage.html"
+
+# Benchmark integration tests
+test-integration-bench:
+	@echo "🏃 Running integration benchmarks..."
+	@cd test/integration && go test -v -bench=. -benchmem ./...
+
+# Help target
+help-integration:
+	@echo "Integration Test Commands:"
+	@echo "  test-integration              - Run all integration tests"
+	@echo "  test-integration-setup        - Set up integration test environment"
+	@echo "  test-integration-cleanup      - Clean up integration test data"
+	@echo "  test-integration-verbose      - Run integration tests with verbose output"
+	@echo "  test-integration-quick        - Run quick integration tests"
+	@echo "  test-integration-multi-tenant - Run multi-tenant specific tests"
+	@echo "  test-integration-auth         - Run auth integration tests"
+	@echo "  test-integration-db           - Run database operation tests"
+	@echo "  test-integration-performance  - Run performance tests"
+	@echo "  test-integration-ci           - Run tests for CI/CD"
+	@echo "  test-integration-coverage     - Run tests with coverage report"
+	@echo "  test-integration-bench        - Run integration benchmarks"
+	@echo "  test-db-reset                 - Reset test databases"
+	@echo "  test-db-status                - Check test database status"
+	@echo ""
+	@echo "Environment Variables:"
+	@echo "  CENTRAL_AUTH_DB_URL           - Auth database connection string"
+	@echo "  LONGBEACH_DB_URL              - Longbeach database connection string"
+	@echo "  TEST_TIMEOUT_SECONDS          - Test timeout in seconds (default: 300)"
+	@echo "  TEST_CLEANUP_DATA             - Clean up test data (default: true)"
+	@echo "  TEST_VERBOSE                  - Enable verbose output (default: false)"
+	@echo "  SKIP_INTEGRATION_TESTS        - Skip integration tests (default: false)"

@@ -2,305 +2,187 @@
 package auth
 
 import (
+	"log"
 	"net/http"
-	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"oilgas-backend/internal/models"
 )
 
-type Handlers struct {
-	service Service
+type AuthHandler struct {
+	authService Service
 }
 
-func NewHandlers(service Service) *Handlers {
-	return &Handlers{
-		service: service,
+func NewAuthHandler(authService Service) *AuthHandler {
+	return &AuthHandler{
+		authService: authService,
 	}
 }
 
-// Fix #1: SearchUsers method signature and UserSearchFilters type
-func (h *Handlers) SearchUsers(c *gin.Context) {
-	var filters UserSearchFilters
-	if err := c.ShouldBindQuery(&filters); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid search parameters",
-			"details": err.Error(),
-		})
-		return
-	}
 
-	// Get current user from context for access control
-	currentUser, exists := c.Get("user")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "User not found in context",
-		})
-		return
-	}
-
-	user := currentUser.(*User)
-	
-	// Apply user-specific filtering
-	filters = h.applyUserSearchFiltering(user, filters)
-
-	// Fixed: Correct method call with proper variable assignment (2 return values)
-	users, total, err := h.service.SearchUsers(c.Request.Context(), filters)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to search users",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"users": users,
-		"total": total,
-		"filters": filters,
-	})
+type UserInfo struct {
+	ID       int    `json:"id"`
+	Email    string `json:"email"`
+	FullName string `json:"full_name"`
+	Role     string `json:"role"`
+	TenantID string `json:"tenant_id"`
 }
 
-// Fix #2: Remove the undefined ListAllUsers method call and replace with SearchUsers
-func (h *Handlers) ListAllUsers(c *gin.Context) {
-	var filters UserSearchFilters
-	if err := c.ShouldBindQuery(&filters); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid filter parameters",
-			"details": err.Error(),
-		})
-		return
-	}
-
-	// Get current user from context
-	currentUser, exists := c.Get("user")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "User not found in context",
-		})
-		return
-	}
-
-	user := currentUser.(*User)
-	
-	// Enterprise admins can see all users, others are restricted
-	if !user.CanPerformCrossTenantOperation() {
-		filters = h.applyUserSearchFiltering(user, filters)
-	}
-
-	// Use SearchUsers instead of the non-existent ListAllUsers
-	users, total, err := h.service.SearchUsers(c.Request.Context(), filters)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to list users",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"users": users,
-		"total": total,
-	})
-}
-
-// Fix #3: GetUserStats method signature (no parameters needed)
-func (h *Handlers) GetUserStats(c *gin.Context) {
-	// Fixed: Remove the UserStatsRequest parameter
-	stats, err := h.service.GetUserStats(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to get user statistics",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, stats)
-}
-
-// Helper method for user search filtering
-func (h *Handlers) applyUserSearchFiltering(currentUser *User, filters UserSearchFilters) UserSearchFilters {
-	// Customer contacts can only see other contacts from same customer
-	if currentUser.IsCustomerContact() && currentUser.CustomerID != nil {
-		filters.CustomerID = currentUser.CustomerID
-		filters.OnlyCustomerContacts = true
-	}
-	
-	// Non-enterprise users are limited to their tenant access
-	if !currentUser.IsEnterpriseUser {
-		accessibleTenants := make([]string, 0, len(currentUser.TenantAccess))
-		for _, access := range currentUser.TenantAccess {
-			accessibleTenants = append(accessibleTenants, access.TenantID)
-		}
-		filters.AccessibleTenants = accessibleTenants
-	}
-	
-	return filters
-}
-
-// Update user profile (self-service)
-func (h *Handlers) UpdateProfile(c *gin.Context) {
-	currentUser, exists := c.Get("user")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "User not found in context",
-		})
-		return
-	}
-
-	user := currentUser.(*User)
-	
-	var updates UserUpdates
-	if err := c.ShouldBindJSON(&updates); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid update request",
-			"details": err.Error(),
-		})
-		return
-	}
-
-	// Filter updates to only allow profile changes for regular users
-	filtered := h.filterProfileUpdates(&updates)
-	
-	updatedUser, err := h.service.UpdateUser(c.Request.Context(), user.ID, filtered)
-	if err != nil {
-		switch err {
-		case ErrInvalidCredentials:
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Current password is incorrect",
-			})
-		case ErrWeakPassword:
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "New password does not meet security requirements",
-			})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Failed to update profile",
-			})
-		}
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"user": updatedUser.ToResponse(),
-		"message": "Profile updated successfully",
-	})
-}
-
-// Admin user management
-func (h *Handlers) UpdateUser(c *gin.Context) {
-	userID, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid user ID",
-		})
-		return
-	}
-
-	var updates UserUpdates
-	if err := c.ShouldBindJSON(&updates); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid update request",
-			"details": err.Error(),
-		})
-		return
-	}
-
-	updatedUser, err := h.service.UpdateUser(c.Request.Context(), userID, updates)
-	if err != nil {
-		switch err {
-		case ErrUserNotFound:
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": "User not found",
-			})
-		case ErrInvalidUserRole:
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Invalid user role specified",
-			})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Failed to update user",
-			})
-		}
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"user": updatedUser.ToResponse(),
-		"message": "User updated successfully",
-	})
-}
-
-// Filter profile updates to prevent privilege escalation
-func (h *Handlers) filterProfileUpdates(updates *UserUpdates) UserUpdates {
-	// Only allow basic profile information
-	filtered := UserUpdates{
-		FullName: updates.FullName,
-		Email:    updates.Email,
-	}
-	
-	// Password changes allowed if both old and new provided
-	if updates.CurrentPassword != nil && updates.NewPassword != nil {
-		filtered.CurrentPassword = updates.CurrentPassword
-		filtered.NewPassword = updates.NewPassword
-	}
-	
-	return filtered
-}
-
-// Authentication endpoints
-func (h *Handlers) Login(c *gin.Context) {
+func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid login request",
+			"error": "Invalid request format",
 			"details": err.Error(),
 		})
 		return
 	}
 
-	response, err := h.service.Authenticate(c.Request.Context(), req)
+	// Capture security info for logging
+	clientIP := c.ClientIP()
+	userAgent := c.GetHeader("User-Agent")
+
+	// Authenticate using the new auth service
+	response, err := h.authService.Authenticate(c.Request.Context(), LoginRequest{
+		Email:    req.Email,
+		Password: req.Password,
+		TenantID: req.TenantID,
+	})
+
 	if err != nil {
+		// Log security event (failed login attempt)
+		log.Printf("LOGIN_FAILED: email=%s ip=%s ua=%s error=%v", 
+			req.Email, clientIP, userAgent, err)
+
+		// Map auth service errors to HTTP responses
 		switch err {
 		case ErrInvalidCredentials:
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Invalid email or password",
-			})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+		case ErrUserNotFound:
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		case ErrTenantAccessDenied:
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Access denied to requested tenant",
-			})
+			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to specified tenant"})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Authentication failed",
-			})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Login failed"})
 		}
 		return
 	}
 
+	// Log successful login for security audit
+	tenantID := ""
+	if response.TenantContext != nil {
+		tenantID = response.TenantContext.TenantID
+	}
+	log.Printf("LOGIN_SUCCESS: user=%s tenant=%s ip=%s", 
+		response.User.Email, tenantID, clientIP)
+
+	// Return clean response
 	c.JSON(http.StatusOK, response)
 }
 
-func (h *Handlers) Logout(c *gin.Context) {
-	token := c.GetHeader("Authorization")
-	if token == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "No token provided",
-		})
+func (h *AuthHandler) Logout(c *gin.Context) {
+	// Extract token from Authorization header
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No authorization header"})
 		return
 	}
 
 	// Remove "Bearer " prefix
-	if len(token) > 7 && token[:7] == "Bearer " {
-		token = token[7:]
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token == authHeader {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid authorization format"})
+		return
 	}
 
-	err := h.service.Logout(c.Request.Context(), token)
+	// Log security event
+	log.Printf("LOGOUT: ip=%s", c.ClientIP())
+
+	// Logout using auth service
+	err := h.authService.Logout(c.Request.Context(), token)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to logout",
+		log.Printf("LOGOUT_ERROR: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Logout failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+}
+
+func (h *AuthHandler) Me(c *gin.Context) {
+	// Get user info from context (set by auth middleware)
+	userInterface, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	user, ok := userInterface.(*User)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user data"})
+		return
+	}
+
+	tenantID := c.GetString("tenant_id")
+
+	c.JSON(http.StatusOK, gin.H{
+		"user": UserInfo{
+			ID:       user.ID,
+			Email:    user.Email,
+			FullName: user.FullName,
+			Role:     string(user.Role),
+			TenantID: tenantID,
+		},
+	})
+}
+
+func (h *AuthHandler) RegisterCustomerContact(c *gin.Context) {
+	var req struct {
+		Email       string   `json:"email" binding:"required,email"`
+		FullName    string   `json:"full_name" binding:"required"`
+		Password    string   `json:"password" binding:"required"`
+		TenantID    string   `json:"tenant_id" binding:"required"`
+		CustomerID  int      `json:"customer_id" binding:"required"`
+		YardAccess  []string `json:"yard_access"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request format",
+			"details": err.Error(),
 		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Logged out successfully",
+	user, err := h.authService.CreateCustomerContact(c.Request.Context(), CreateCustomerContactRequest{
+		Email:      req.Email,
+		FullName:   req.FullName,
+		Password:   req.Password,
+		TenantID:   req.TenantID,
+		CustomerID: req.CustomerID,
+		YardAccess: req.YardAccess,
+	})
+
+	if err != nil {
+		switch err {
+		case ErrUserExists:
+			c.JSON(http.StatusConflict, gin.H{"error": "User already exists"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Customer contact created successfully",
+		"user": UserInfo{
+			ID:       user.ID,
+			Email:    user.Email,
+			FullName: user.FullName,
+			Role:     string(user.Role),
+			TenantID: req.TenantID,
+		},
 	})
 }

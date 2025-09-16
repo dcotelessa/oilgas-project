@@ -38,14 +38,22 @@ func createOptimizedTenantConnection(tenantID string) (*sql.DB, error) {
 		return db, nil
 	}
 
-	// Get base connection string
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		return nil, fmt.Errorf("DATABASE_URL environment variable not set")
+	// Get tenant-specific database URL
+	var tenantURL string
+	switch tenantID {
+	case "longbeach":
+		tenantURL = os.Getenv("LONGBEACH_DB_URL")
+		if tenantURL == "" {
+			return nil, fmt.Errorf("LONGBEACH_DB_URL environment variable not set")
+		}
+	case "bakersfield":
+		tenantURL = os.Getenv("BAKERSFIELD_DB_URL")
+		if tenantURL == "" {
+			return nil, fmt.Errorf("BAKERSFIELD_DB_URL environment variable not set")
+		}
+	default:
+		return nil, fmt.Errorf("unsupported tenant: %s", tenantID)
 	}
-
-	// Build tenant-specific connection string
-	tenantURL := buildTenantConnectionString(databaseURL, tenantID)
 
 	db, err := sql.Open("postgres", tenantURL)
 	if err != nil {

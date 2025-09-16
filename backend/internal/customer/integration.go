@@ -1,0 +1,200 @@
+// backend/internal/customer/integration.go
+package customer
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+)
+
+// IntegrationService handles cross-domain operations
+type IntegrationService struct {
+	customerSvc Service
+	authSvc     AuthService
+	db          *sql.DB
+}
+
+func NewIntegrationService(customerSvc Service, authSvc AuthService, db *sql.DB) *IntegrationService {
+	return &IntegrationService{
+		customerSvc: customerSvc,
+		authSvc:     authSvc,
+		db:          db,
+	}
+}
+
+// CustomerOnboardingWorkflow handles complete customer setup
+type CustomerOnboardingRequest struct {
+	Customer        *Customer           `json:"customer"`
+	PrimaryContact  ContactInfo         `json:"primary_contact"`
+	AdditionalContacts []ContactInfo    `json:"additional_contacts,omitempty"`
+	WorkOrderAccess bool                `json:"work_order_access"`
+}
+
+type ContactInfo struct {
+	Email     string `json:"email"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Role      string `json:"role"`
+}
+
+// OnboardCustomer creates customer and all related entities in a transaction
+func (i *IntegrationService) OnboardCustomer(ctx context.Context, tenantID string, req *CustomerOnboardingRequest) (*Customer, error) {
+	tracker := NewPerformanceTracker("customer_onboarding")
+	defer tracker.LogIfSlow(time.Second * 5)
+	
+	tx, err := i.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+	
+	// Step 1: Create customer
+	req.Customer.TenantID = tenantID
+	err = i.customerSvc.CreateCustomer(ctx, req.Customer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create customer: %w", err)
+	}
+	
+	// Step 2: Register primary contact
+	err = i.customerSvc.RegisterCustomerContact(
+		ctx, tenantID, req.Customer.ID,
+		req.PrimaryContact.Email, req.PrimaryContact.FirstName,
+		req.PrimaryContact.LastName, req.PrimaryContact.Role,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register primary contact: %w", err)
+	}
+	
+	// Step 3: Register additional contacts
+	for _, contact := range req.AdditionalContacts {
+		err = i.customerSvc.RegisterCustomerContact(
+			ctx, tenantID, req.Customer.ID,
+			contact.Email, contact.FirstName, contact.LastName, contact.Role,
+		)
+		if err != nil {
+			// Log error but continue with other contacts
+			fmt.Printf("Warning: failed to register additional contact %s: %v\n", contact.Email, err)
+		}
+	}
+	
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	
+	return req.Customer, nil
+}
+
+// CustomerMigrationService handles data migration scenarios
+type CustomerMigrationService struct {
+	customerSvc Service
+	validator   *ValidationUtils
+}
+
+func NewCustomerMigrationService(customerSvc Service) *CustomerMigrationService {
+	return &CustomerMigrationService{
+		customerSvc: customerSvc,
+		validator:   &ValidationUtils{},
+	}
+}
+
+// LegacyCustomer represents customer data from legacy systems
+type LegacyCustomer struct {
+	OldID           string `json:"old_id"`
+	Name            string `json:"name"`
+	CompanyCode     string `json:"company_code"`
+	BillingAddress  string `json:"billing_address"`
+	TaxNumber       string `json:"tax_number"`
+	PaymentTerms    string `json:"payment_terms"`
+	Status          string `json:"status"`
+	PrimaryContact  string `json:"primary_contact"`
+	ContactEmail    string `json:"contact_email"`
+}
+
+// MigrateFromLegacy converts legacy customer data to new format
+func (m *CustomerMigrationService) MigrateFromLegacy(ctx context.Context, tenantID string, legacy *LegacyCustomer) (*Customer, error) {
+	// Parse legacy address (assuming simple comma-separated format)
+	addressParts := strings.Split(legacy.BillingAddress, ",")
+	address := Address{
+		Street: strings.TrimSpace(addressParts[0]),
+	}
+	if len(addressParts) > 1 {
+		address.City = strings.TrimSpace(addressParts[1])
+	}
+	if len(addressParts) > 2 {
+		address.State = strings.TrimSpace(addressParts[2])
+	}
+	
+	// Normalize and validate data
+	companyCode := m.validator.NormalizeCompanyCode(legacy.CompanyCode)
+	taxID := m.validator.FormatTaxID(legacy.TaxNumber)
+	
+	// Map legacy status
+	status := StatusActive
+	switch strings.ToLower(legacy.Status) {
+	case "inactive", "disabled":
+		status = StatusInactive
+	case "suspended", "hold":
+		status = StatusSuspended
+	}
+	
+	customer := &Customer{
+		TenantID:    tenantID,
+		Name:        legacy.Name,
+		CompanyCode: companyCode,
+		Status:      status,
+		BillingInfo: BillingInfo{
+			TaxID:        taxID,
+			PaymentTerms: legacy.PaymentTerms,
+			Address:      address,
+		},
+	}
+	
+	err := m.customerSvc.CreateCustomer(ctx, customer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to migrate customer %s: %w", legacy.OldID, err)
+	}
+	
+	return customer, nil
+}
+
+// BatchMigrateFromLegacy handles bulk migration with error handling
+func (m *CustomerMigrationService) BatchMigrateFromLegacy(ctx context.Context, tenantID string, legacyCustomers []LegacyCustomer) (*MigrationResult, error) {
+	result := &MigrationResult{
+		Total:     len(legacyCustomers),
+		StartTime: time.Now(),
+	}
+	
+	for _, legacy := range legacyCustomers {
+		customer, err := m.MigrateFromLegacy(ctx, tenantID, &legacy)
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, MigrationError{
+				LegacyID: legacy.OldID,
+				Error:    err.Error(),
+			})
+			continue
+		}
+		
+		result.Successful++
+		result.MigratedCustomers = append(result.MigratedCustomers, customer)
+	}
+	
+	result.Duration = time.Since(result.StartTime)
+	return result, nil
+}
+
+type MigrationResult struct {
+	Total              int                `json:"total"`
+	Successful         int                `json:"successful"`
+	Failed             int                `json:"failed"`
+	StartTime          time.Time          `json:"start_time"`
+	Duration           time.Duration      `json:"duration"`
+	MigratedCustomers  []*Customer        `json:"migrated_customers"`
+	Errors             []MigrationError   `json:"errors"`
+}
+
+type MigrationError struct {
+	LegacyID string `json:"legacy_id"`
+	Error    string `json:"error"`
+}

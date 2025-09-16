@@ -1,27 +1,58 @@
 services:
   auth-db:
     image: postgres:15
+    container_name: auth_central_test
     environment:
       POSTGRES_DB: auth_central
       POSTGRES_USER: testuser
       POSTGRES_PASSWORD: testpass
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
     ports:
       - "5432:5432"
+    networks:
+      - test_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d auth_central"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
       
-  tenant-longbeach-db:
+  longbeach-db:
     image: postgres:15
+    container_name: location_longbeach_test
     environment:
       POSTGRES_DB: location_longbeach
       POSTGRES_USER: testuser  
       POSTGRES_PASSWORD: testpass
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
     ports:
       - "5433:5432"
+    networks:
+      - test_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d location_longbeach"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
       
-  tenant-bakersfield-db:
+  bakersfield-db:
     image: postgres:15
+    container_name: location_bakersfield_test
     environment:
       POSTGRES_DB: location_bakersfield
       POSTGRES_USER: testuser
       POSTGRES_PASSWORD: testpass
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
     ports:
       - "5434:5432"
+    networks:
+      - test_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d location_bakersfield"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  test_network:
+    driver: bridge

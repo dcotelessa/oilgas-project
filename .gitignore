@@ -18,17 +18,16 @@ vendor/
 node_modules/
 dist/
 
-# Generated data
+# Generated data and temporary files
 customers.csv
 customers_cleaned.csv
-database/data/exported/*
-database/data/clean/*
-database/logs/*
+database/data/
+database/logs/
+database/dev-data/
 
-# Prep
+# Legacy prep data (analysis phase)
 database/analysis/*
 database/schema/*
-database/migrations/*
 database/seeds/*
 database/test-seeds/*
 db_prep/*
@@ -44,6 +43,22 @@ standardized-importer
 *.swp
 .DS_Store
 
-# Docker
+# Docker volumes and runtime data
 postgres_data/
 pgadmin_data/
+
+# Test and temporary files
+*.tmp
+*.temp
+*.log
+integration_coverage.html
+integration_coverage.out
+*.test
+/bin/
+/tmp/
+
+# Integration test results
+integration_test_results.json
+
+# Development documentation (internal only)
+claude-code-instructions.md

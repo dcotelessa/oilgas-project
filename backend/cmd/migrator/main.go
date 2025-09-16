@@ -17,8 +17,8 @@ import (
 )
 
 type MigrationConfig struct {
-	DevDatabaseURL  string
-	TestDatabaseURL string
+	CentralAuthURL  string
+	LongBeachURL    string
 	DataPath        string
 	LogPath         string
 	TenantID        string
@@ -37,8 +37,8 @@ type MigrationStats struct {
 
 func main() {
 	config := MigrationConfig{
-		DevDatabaseURL:  getEnv("DEV_DATABASE_URL", "postgresql://oilgas_user:oilgas_pass@localhost:5432/oilgas_dev"),
-		TestDatabaseURL: getEnv("TEST_DATABASE_URL", "postgresql://oilgas_test_user:oilgas_test_pass@localhost:5433/oilgas_test"),
+		CentralAuthURL:  getEnv("CENTRAL_AUTH_DB_URL", ""),
+		LongBeachURL:    getEnv("LONGBEACH_DB_URL", ""),
 		DataPath:        getEnv("DATA_PATH", "/app/data"),
 		LogPath:         getEnv("LOG_PATH", "/app/logs"),
 		TenantID:        getEnv("TENANT_ID", "local-dev"),

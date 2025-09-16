@@ -70,10 +70,10 @@ func main() {
 		tenantID = os.Args[2]
 	}
 	
-	// Database connection
-	dbURL := os.Getenv("DATABASE_URL")
+	// Database connection - use Long Beach database for customer imports
+	dbURL := os.Getenv("LONGBEACH_DB_URL")
 	if dbURL == "" {
-		dbURL = "postgresql://oilgas_user:oilgas_pass@localhost:5432/oilgas_dev"
+		log.Fatal("LONGBEACH_DB_URL environment variable not set")
 	}
 	
 	log.Printf("Importing %s to database...", csvFile)

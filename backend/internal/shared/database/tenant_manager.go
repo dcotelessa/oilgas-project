@@ -3,7 +3,6 @@ package database
 
 import (
     "context"
-    "database/sql"
     "fmt"
     "sync"
     "time"
